@@ -1,0 +1,10 @@
+slurm/*
+experiments/*
+batch_files/*
+classification/.ipynb_checkpoints/*
+classification/.svn/*
+classification/*.ipynb
+classification/__pycache__/*
+classification/vit_pytorch/.ipynb_checkpoints/*
+classification/vit_pytorch/.svn/*
+classification/vit_pytorch/__pycache__/*
