@@ -12,23 +12,23 @@ def get_model(args,num_classes):
         if args.model == 'simple_vit':
             model = SimpleViT(
                     image_size = args.train_crop_size,
-                    patch_size = 32,
+                    patch_size = 16,
                     num_classes = num_classes,
-                    dim = 1024,
-                    depth = 6,
-                    heads = 16,
-                    mlp_dim = 2048,
+                    dim = 384,
+                    depth = 12,
+                    heads = 6,
+                    mlp_dim = 1536,
                     attention=attention)
         elif args.model == 'ca_vit':
             model = CaiT(
                     image_size = args.train_crop_size,
-                    patch_size = 32,
+                    patch_size = 16,
                     num_classes = num_classes,
-                    dim = 1024,
+                    dim = 384,
                     depth = 12,             # depth of transformer for patch to patch attention only
                     cls_depth = 2,          # depth of cross attention of CLS tokens to patch
-                    heads = 16,
-                    mlp_dim = 2048,
+                    heads = 6,
+                    mlp_dim = 1536,
                     dropout = 0.1,
                     emb_dropout = 0.1,
                     layer_dropout = 0.05,   # randomly dropout 5% of the layers

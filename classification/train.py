@@ -18,6 +18,12 @@ import resnet_pytorch
 import imbalanced_dataset
 import initialise_model 
 
+try:
+    from apex import amp
+    import apex
+except ImportError:
+    amp = None
+
 
 
 def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema=None, scaler=None):
@@ -25,6 +31,8 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", utils.SmoothedValue(window_size=1, fmt="{value}"))
     metric_logger.add_meter("img/s", utils.SmoothedValue(window_size=10, fmt="{value}"))
+    
+    apex=args.apex
 
     header = f"Epoch: [{epoch}]"
     for i, (image, target) in enumerate(metric_logger.log_every(data_loader, args.print_freq, header)):
@@ -44,9 +52,11 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
             scaler.step(optimizer)
             scaler.update()
         else:
-            loss.backward()
-            if args.clip_grad_norm is not None:
-                nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+            if apex:
+                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
             optimizer.step()
 
         if model_ema and i % args.model_ema_steps == 0:
@@ -305,10 +315,16 @@ def main(args):
         )
     elif opt_name == "adamw":
         optimizer = torch.optim.AdamW(parameters, lr=args.lr, weight_decay=args.weight_decay)
+    elif opt_name == "lamb":
+        optimizer = apex.optimizers.FusedLAMB(parameters, lr=args.lr, weight_decay=args.weight_decay)
     else:
         raise RuntimeError(f"Invalid optimizer {args.opt}. Only SGD, RMSprop and AdamW are supported.")
 
     scaler = torch.cuda.amp.GradScaler() if args.amp else None
+    if args.apex:
+        model, optimizer = amp.initialize(model, optimizer,
+                                          opt_level=args.apex_opt_level
+                                          )
 
     args.lr_scheduler = args.lr_scheduler.lower()
     if args.lr_scheduler == "steplr":
@@ -373,6 +389,8 @@ def main(args):
             model_ema.load_state_dict(checkpoint["model_ema"])
         if scaler:
             scaler.load_state_dict(checkpoint["scaler"])
+        elif args.apex:
+            amp.load_state_dict(checkpoint["amp"])
 
     if args.test_only:
         # We disable the cudnn benchmarking because it can noticeably affect the accuracy
@@ -406,6 +424,8 @@ def main(args):
                 checkpoint["model_ema"] = model_ema.state_dict()
             if scaler:
                 checkpoint["scaler"] = scaler.state_dict()
+            elif args.apex:
+                checkpoint["amp"] = amp.state_dict()
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"model_{epoch}.pth"))
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
 
@@ -546,6 +566,13 @@ def get_args_parser(add_help=True):
         "--ra-reps", default=3, type=int, help="number of repetitions for Repeated Augmentation (default: 3)"
     )
     parser.add_argument("--weights", default=None, type=str, help="the weights enum name to load")
+    parser.add_argument('--apex', action='store_true',
+                        help='Use apex for mixed precision training')
+    parser.add_argument('--apex-opt-level', default='O2', type=str,
+                        help='For apex mixed precision training'
+                             'O0 for FP32 training, O1 for mixed precision training.'
+                             'For further detail, see https://github.com/NVIDIA/apex/tree/master/examples/imagenet'
+                        )
     return parser
 
 
