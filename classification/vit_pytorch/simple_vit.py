@@ -1,10 +1,13 @@
 import torch
 from torch import nn
-from vit_pytorch.gumbel import Gumbel
+from vit_pytorch.gumbel import Gumbel,NormGumbel,SoftGumbel,SoftEntropyGumbel
 
 from einops import rearrange
 from einops.layers.torch import Rearrange
-
+try :
+    import resnet_cifar
+except ImportError:
+    from classification import resnet_cifar
 # helpers
 
 def pair(t):
@@ -50,7 +53,7 @@ class Attention(nn.Module):
         elif attention == 'sigmoid':
             self.attend = nn.Sigmoid()
         elif attention == 'gumbel':
-            self.attend = Gumbel()
+            self.attend = SoftGumbel()
             
             
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
@@ -86,7 +89,7 @@ class Transformer(nn.Module):
         return x
 
 class SimpleViT(nn.Module):
-    def __init__(self, *, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, channels = 3, dim_head = 64,attention='softmax'):
+    def __init__(self, *, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, channels = 3, dim_head = 64,attention='softmax',use_norm=None):
         super().__init__()
         image_height, image_width = pair(image_size)
         patch_height, patch_width = pair(patch_size)
@@ -104,10 +107,20 @@ class SimpleViT(nn.Module):
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim,attention=attention)
 
         self.to_latent = nn.Identity()
-        self.linear_head = nn.Sequential(
+        
+        if use_norm == 'cosine':
+            self.linear_head = nn.Sequential(
             nn.LayerNorm(dim),
-            nn.Linear(dim, num_classes)
-        )
+            resnet_cifar.CosNorm_Classifier(dim, num_classes))
+        elif use_norm == 'cosine':
+            self.linear_head = nn.Sequential(
+            nn.LayerNorm(dim),
+            resnet_cifar.NormedLinear(dim, num_classes))
+        else:
+            self.linear_head = nn.Sequential(
+                nn.LayerNorm(dim),
+                nn.Linear(dim, num_classes)
+            )
 
     def forward(self, img):
         *_, h, w, dtype = *img.shape, img.dtype
