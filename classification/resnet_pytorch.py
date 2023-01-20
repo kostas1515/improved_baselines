@@ -931,22 +931,12 @@ def se_resnet50(pretrained=None, progress=True,use_norm=None,use_gumbel=False, *
     else:
         return _resnet('resnet50', SEBottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
                        **kwargs)
-        
-
-
-def se_resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: str = None,use_gumbel=False, **kwargs: Any) -> ResNet:
-    r"""ResNeXt-50 32x4d model from
-    `"Aggregated Residual Transformation for Deep Neural Networks" <https://arxiv.org/pdf/1611.05431.pdf>`_.
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-        progress (bool): If True, displays a progress bar of the download to stderr
-    """
-    kwargs["groups"] = 32
-    kwargs["width_per_group"] = 4
     
-    if use_gumbel is True:
-        return _resnet("resnext50_32x4d", SEBottleneckGumbel, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm, **kwargs)
+def cb_resnet50(pretrained=None, progress=True,use_norm=None,use_gumbel=False, **kwargs):
+    if use_gumbel is True: 
+        return _resnet('resnet50', CBAMBottleneckGumbel, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
+                       **kwargs)
     else:
-        return _resnet("resnext50_32x4d", SEBottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm, **kwargs)
-        
+        return _resnet('resnet50', CBAMBottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
+                       **kwargs)
         

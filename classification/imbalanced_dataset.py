@@ -1,12 +1,16 @@
 import torch
 import torchvision
-import torchvision.transforms as transforms
+from torchvision.transforms import autoaugment, transforms
 import numpy as np
 import torchvision.datasets
 from torch.utils.data import Dataset
 import os
 from PIL import Image
 from catalyst.data import  BalanceClassSampler,DistributedSamplerWrapper
+from torchvision.transforms.functional import InterpolationMode
+import torchvision.datasets as datasets
+import presets
+
 
 class IMBALANCECIFAR10(torchvision.datasets.CIFAR10):
     cls_num = 10
@@ -173,38 +177,56 @@ class LT_Dataset_Eval(Dataset):
         return sample, target 
 
 
-def get_dataset_lt(args,num_classes,train_txt,eval_txt,transform_train,transform_test):
 
-    distributed = args.distributed
-    root=args.data_path
+def load_cifar(args):
     auto_augment_policy = getattr(args, "auto_augment", None)
-    auto_augment=auto_augment_policy
-    sampler =  args.sampler
-    num_classes = num_classes
-    train_txt = train_txt
-    eval_txt = eval_txt
-
-    
-    train_dataset = LT_Dataset(root, train_txt,num_classes, transform=transform_train)
-    eval_dataset = LT_Dataset_Eval(root, eval_txt,train_dataset.class_map, num_classes, transform=transform_test)
-
-    if distributed:
-        if sampler=='random':
-            train_sampler = torch.utils.data.distributed.DistributedSampler(
-                train_dataset)
+    random_erase_prob = getattr(args, "random_erase", 0.0)
+    ra_magnitude = args.ra_magnitude
+    augmix_severity = args.augmix_severity
+    trans=[transforms.RandomCrop(32, padding=4), # fill parameter needs torchvision installed from source
+                     transforms.RandomHorizontalFlip()]
+    if auto_augment_policy is not None:
+        if auto_augment_policy == "ra":
+            trans.append(autoaugment.RandAugment(interpolation=InterpolationMode.BILINEAR, magnitude=ra_magnitude))
+        elif auto_augment_policy == "ta_wide":
+            trans.append(autoaugment.TrivialAugmentWide(interpolation=InterpolationMode.BILINEAR))
+        elif auto_augment_policy == "augmix":
+            trans.append(autoaugment.AugMix(interpolation=InterpolationMode.BILINEAR, severity=augmix_severity))
         else:
-            train_labels = train_dataset.targets
-            balanced_sampler = BalanceClassSampler(train_labels,mode=sampler)
-            train_sampler= DistributedSamplerWrapper(balanced_sampler)
+            aa_policy = autoaugment.AutoAugmentPolicy(auto_augment_policy)
+            trans.append(autoaugment.AutoAugment(policy=aa_policy, interpolation=InterpolationMode.BILINEAR))
+        trans.extend(
+        [
+            transforms.ToTensor(),
+            presets.Cutout(n_holes=1, length=16),
+            transforms.ConvertImageDtype(torch.float),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+        ])
+        if random_erase_prob > 0:
+            trans.append(transforms.RandomErasing(p=random_erase_prob))
 
-        test_sampler = torch.utils.data.distributed.DistributedSampler(
-            eval_dataset)
+        transform_train = transforms.Compose(trans)
     else:
-        if sampler=='random':
-            train_sampler = torch.utils.data.RandomSampler(train_dataset)
-        else:
-            train_labels = train_dataset.targets
-            train_sampler = BalanceClassSampler(train_labels,mode=sampler)
-        test_sampler = torch.utils.data.SequentialSampler(eval_dataset)
+        transform_train = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
+    transform_val = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+    ])
 
-    return train_dataset, eval_dataset, train_sampler, test_sampler
+    if args.dset_name == 'cifar10':
+        train_dataset = IMBALANCECIFAR10(root='../../../datasets/',
+                                                            imb_type=args.imb_type, imb_factor=args.imb_factor,
+                                                            rand_number=args.rand_number, train=True, download=True, transform=transform_train)
+        val_dataset = datasets.CIFAR10(root='../../../datasets/', train=False, download=True, transform=transform_val)
+    elif args.dset_name == 'cifar100':
+        train_dataset = IMBALANCECIFAR100(root='../../../datasets/',
+                                                             imb_type=args.imb_type, imb_factor=args.imb_factor,
+                                                             rand_number=args.rand_number, train=True, download=True, transform=transform_train)
+        val_dataset = datasets.CIFAR100(root='../../../datasets/', train=False, download=True, transform=transform_val)
+
+    return train_dataset, val_dataset

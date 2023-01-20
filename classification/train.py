@@ -17,12 +17,24 @@ from torchvision.transforms.functional import InterpolationMode
 import resnet_pytorch
 import imbalanced_dataset
 import initialise_model 
+from catalyst.data import  BalanceClassSampler,DistributedSamplerWrapper
 
 try:
     from apex import amp
     import apex
 except ImportError:
     amp = None
+    
+    
+def record_result(result,args):
+    df = pd.DataFrame.from_dict(vars(args))
+    df['acc']=result
+    file2save=os.path.join(args.output_dir,'results.csv')
+    df = df.iloc[1: , :]
+    if os.path.exists(file2save):
+        df.to_csv(file2save, mode='a', header=False)
+    else:
+        df.to_csv(file2save)
 
 
 
@@ -180,6 +192,9 @@ def load_data(traindir, valdir, args):
             eval_txt = "../../../datasets/places365_standard/Places_LT_test.txt"
             dataset = imbalanced_dataset.LT_Dataset(args.data_path, train_txt,num_classes, transform=train_transform)
             num_classes = len(dataset.cls_num_list)
+        else:
+            dataset, dataset_test = imbalanced_dataset.load_cifar(args)
+            num_classes = len(dataset.num_per_cls_dict)
         
         if args.cache_dataset:
             print(f"Saving dataset_train to {cache_path}")
@@ -206,6 +221,8 @@ def load_data(traindir, valdir, args):
                 valdir,
                 preprocessing,
             )
+        elif args.dset_name.startswith('cifar') is True:
+            pass # test dataset already loaded
         else:
             dataset_test = imbalanced_dataset.LT_Dataset_Eval(args.data_path, eval_txt,dataset.class_map, num_classes, transform=preprocessing)
             
@@ -219,10 +236,20 @@ def load_data(traindir, valdir, args):
         if hasattr(args, "ra_sampler") and args.ra_sampler:
             train_sampler = RASampler(dataset, shuffle=True, repetitions=args.ra_reps)
         else:
-            train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+            if args.sampler=='random':
+                train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+            else:
+                train_labels = dataset.targets
+                balanced_sampler = BalanceClassSampler(train_labels,mode=args.sampler)
+                train_sampler= DistributedSamplerWrapper(balanced_sampler)
+        
         test_sampler = torch.utils.data.distributed.DistributedSampler(dataset_test, shuffle=False)
     else:
-        train_sampler = torch.utils.data.RandomSampler(dataset)
+        if args.sampler=='random':
+            train_sampler = torch.utils.data.RandomSampler(dataset)
+        else:
+            train_labels = dataset.targets
+            train_sampler = BalanceClassSampler(train_labels,mode=args.sampler)
         test_sampler = torch.utils.data.SequentialSampler(dataset_test)
 
     return dataset, dataset_test, train_sampler, test_sampler
@@ -329,6 +356,9 @@ def main(args):
     args.lr_scheduler = args.lr_scheduler.lower()
     if args.lr_scheduler == "steplr":
         main_lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step_size, gamma=args.lr_gamma)
+    elif args.lr_scheduler =='multistep':
+        main_lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer, milestones=args.milestones, gamma=args.lr_gamma)
     elif args.lr_scheduler == "cosineannealinglr":
         main_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=args.epochs - args.lr_warmup_epochs, eta_min=args.lr_min
@@ -404,12 +434,15 @@ def main(args):
 
     print("Start training")
     start_time = time.time()
+    best_acc = 0
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema, scaler)
         lr_scheduler.step()
-        evaluate(model, criterion, data_loader_test, device=device)
+        acc = evaluate(model, criterion, data_loader_test, device=device)
+        if acc>best_acc:
+            best_acc = acc
         if model_ema:
             evaluate(model_ema, criterion, data_loader_test, device=device, log_suffix="EMA")
         if args.output_dir:
@@ -432,6 +465,10 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(f"Training time {total_time_str}")
+    print('best acc is:',best_acc)
+    if args.record_result:
+        if utils.is_main_process():
+            record_result(best_acc,args)
 
 
 def get_args_parser(add_help=True):
@@ -441,7 +478,10 @@ def get_args_parser(add_help=True):
 
     parser.add_argument("--data-path", default="../../../datasets/ILSVRC/Data/CLS-LOC/", type=str, help="dataset path")
     parser.add_argument('--dset_name', default='ImageNet', help='dataset name')
-    parser.add_argument("--model", default="resnet18", type=str, help="model name")
+    parser.add_argument('--rand_number', default=0, type=int, help='fix random number for data sampling')
+    parser.add_argument('--imb_type', default="exp", type=str, help='imbalance type')
+    parser.add_argument('--imb_factor', default=0.01, type=float, help='imbalance factor')
+    parser.add_argument("--model", default="resnet32", type=str, help="model name")
     parser.add_argument('--use_gumbel_se', default=False, help='Gumbel activation in excitation phase of SE',action='store_true')
     parser.add_argument('--classif_norm', default=None,type=str, help='Type of classifier Normalisation {None,norm,cosine')
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
@@ -487,14 +527,16 @@ def get_args_parser(add_help=True):
     )
     parser.add_argument("--mixup-alpha", default=0.0, type=float, help="mixup alpha (default: 0.0)")
     parser.add_argument("--cutmix-alpha", default=0.0, type=float, help="cutmix alpha (default: 0.0)")
-    parser.add_argument("--lr-scheduler", default="steplr", type=str, help="the lr scheduler (default: steplr)")
+    parser.add_argument("--lr-scheduler", default="multistep", type=str, help="the lr scheduler (default: steplr)")
+    parser.add_argument('--milestones',nargs='+', default=[200,220],type=int,
+                        help='decrease lr every step-size epochs')
     parser.add_argument("--lr-warmup-epochs", default=0, type=int, help="the number of epochs to warmup (default: 0)")
     parser.add_argument(
         "--lr-warmup-method", default="constant", type=str, help="the warmup method (default: constant)"
     )
     parser.add_argument("--lr-warmup-decay", default=0.01, type=float, help="the decay for lr")
     parser.add_argument("--lr-step-size", default=30, type=int, help="decrease lr every step-size epochs")
-    parser.add_argument("--lr-gamma", default=0.1, type=float, help="decrease lr by a factor of lr-gamma")
+    parser.add_argument("--lr-gamma", default=0.01, type=float, help="decrease lr by a factor of lr-gamma")
     parser.add_argument("--lr-min", default=0.0, type=float, help="minimum lr of lr schedule (default: 0.0)")
     parser.add_argument("--print-freq", default=100, type=int, help="print frequency")
     parser.add_argument("--output-dir", default=".", type=str, help="path to save outputs")
@@ -522,6 +564,7 @@ def get_args_parser(add_help=True):
     parser.add_argument("--ra-magnitude", default=9, type=int, help="magnitude of auto augment policy")
     parser.add_argument("--augmix-severity", default=3, type=int, help="severity of augmix policy")
     parser.add_argument("--random-erase", default=0.0, type=float, help="random erasing probability (default: 0.0)")
+    parser.add_argument('--sampler', default='random', type=str, help='sampling, [random,upsampling,downsampling]')
 
     # Mixed precision training parameters
     parser.add_argument("--amp", action="store_true", help="Use torch.cuda.amp for mixed precision training")
@@ -573,6 +616,10 @@ def get_args_parser(add_help=True):
                              'O0 for FP32 training, O1 for mixed precision training.'
                              'For further detail, see https://github.com/NVIDIA/apex/tree/master/examples/imagenet'
                         )
+    parser.add_argument('--record-result', dest="record_result",
+        help="Record result in csv format",
+        action="store_true")
+    
     return parser
 
 
