@@ -127,6 +127,58 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
     print(f"{header} Acc@1 {metric_logger.acc1.global_avg:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f}")
     return metric_logger.acc1.global_avg
 
+def select_training_param(model):
+#     print(model)
+    for v in model.parameters():
+        v.requires_grad = False
+    try:
+        torch.nn.init.xavier_uniform_(model.linear.weight)
+        model.linear.weight.requires_grad = True
+        try:
+            model.linear.bias.data.fill_(0.01)
+            model.linear.bias.requires_grad = True
+        except AttributeError:
+            pass
+    except AttributeError:
+        torch.nn.init.xavier_uniform_(model.fc.weight)
+        try:
+            model.fc.bias.requires_grad = True
+            model.fc.bias.data.fill_(0.01)
+        except AttributeError:
+            pass
+        model.fc.weight.requires_grad = True
+        
+
+    return model
+
+
+def finetune_places(model):
+#     print(model)
+    for v in model.parameters():
+        v.requires_grad = False
+    try:
+        torch.nn.init.xavier_uniform_(model.linear.weight)
+        model.linear.weight.requires_grad = True
+        try:
+            model.linear.bias.data.fill_(0.01)
+            model.linear.bias.requires_grad = True
+        except AttributeError:
+            pass
+    except AttributeError:
+        torch.nn.init.xavier_uniform_(model.fc.weight)
+        try:
+            model.fc.bias.requires_grad = True
+            model.fc.bias.data.fill_(0.01)
+        except AttributeError:
+            pass
+        model.fc.weight.requires_grad = True
+    
+    for v in model.layer4[-1].parameters():
+        v.requires_grad = True
+        
+
+    return model
+
 
 def _get_cache_path(filepath):
     import hashlib
@@ -301,12 +353,6 @@ def main(args):
 
     print("Creating model")
     model = initialise_model.get_model(args,num_classes)
-#     try:
-#         # model = torchvision.models.__dict__[args.model](pretrained=args.pretrained,num_classes=num_classes)
-#         model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se},pretrained="{None}")')
-#     except AttributeError:
-#         #model does not exist in pytorch load it from resnet_cifar
-#         model = eval(f'resnet_cifar.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se})')
     model.to(device)
 
     if args.distributed and args.sync_bn:
@@ -352,6 +398,11 @@ def main(args):
         model, optimizer = amp.initialize(model, optimizer,
                                           opt_level=args.apex_opt_level
                                           )
+    if args.decoup:
+        model = select_training_param(model)
+
+    if args.dset_name == 'places_lt':
+        model = finetune_places(model)
 
     args.lr_scheduler = args.lr_scheduler.lower()
     if args.lr_scheduler == "steplr":
@@ -528,6 +579,7 @@ def get_args_parser(add_help=True):
     parser.add_argument("--mixup-alpha", default=0.0, type=float, help="mixup alpha (default: 0.0)")
     parser.add_argument("--cutmix-alpha", default=0.0, type=float, help="cutmix alpha (default: 0.0)")
     parser.add_argument("--lr-scheduler", default="multistep", type=str, help="the lr scheduler (default: steplr)")
+    parser.add_argument('--decoup',action="store_true", help='Freeze all layers except classif layer')
     parser.add_argument('--milestones',nargs='+', default=[200,220],type=int,
                         help='decrease lr every step-size epochs')
     parser.add_argument("--lr-warmup-epochs", default=0, type=int, help="the number of epochs to warmup (default: 0)")
@@ -609,6 +661,13 @@ def get_args_parser(add_help=True):
         "--ra-reps", default=3, type=int, help="number of repetitions for Repeated Augmentation (default: 3)"
     )
     parser.add_argument("--weights", default=None, type=str, help="the weights enum name to load")
+    
+    parser.add_argument(
+        "--pretrained",
+        dest="pretrained",
+        help="Use pre-trained models from the modelzoo or local --> [pytorch, path-to-model]",
+        default=None, type=str,
+    )
     parser.add_argument('--apex', action='store_true',
                         help='Use apex for mixed precision training')
     parser.add_argument('--apex-opt-level', default='O2', type=str,

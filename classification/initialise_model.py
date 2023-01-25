@@ -36,7 +36,7 @@ def get_model(args,num_classes):
     else:
         try:
             # model = torchvision.models.__dict__[args.model](pretrained=args.pretrained,num_classes=num_classes)
-            model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se},pretrained="{None}")')
+            model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se},pretrained="{args.pretrained}")')
         except AttributeError:
             #model does not exist in pytorch load it from resnet_cifar
             model = eval(f'resnet_cifar.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se})')
