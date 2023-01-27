@@ -213,6 +213,8 @@ class ResNet(nn.Module):
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         if use_norm=='cosine':
             self.fc = resnet_cifar.CosNorm_Classifier(512 * block.expansion, num_classes)
+        elif use_norm=='lr_cosine':
+            self.fc = resnet_cifar.CosNorm_Classifier(512 * block.expansion, num_classes,learnable=True)
         elif use_norm=='norm':
             self.fc = resnet_cifar.NormedLinear(512 * block.expansion, num_classes)
         else:
@@ -616,7 +618,70 @@ class CBAMBottleneckGumbel(nn.Module):
         self.downsample = downsample
         self.stride = stride
         # add SE block
-        self.cbam = cbam.CBAM(planes * self.expansion, r,use_gumbel=True)
+        self.cbam = cbam.CBAM(planes * self.expansion, r,use_gumbel=True,use_gumbel_cb=True)
+
+    def forward(self, x: Tensor) -> Tensor:
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu(out)
+
+        out = self.conv3(out)
+        out = self.bn3(out)
+
+        # Add SE operation
+        out = self.cbam(out)
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out += identity
+        out = self.relu(out)
+
+        return out
+    
+class CBAMBottleneckGumbelSigmoid(nn.Module):
+    # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
+    # while original implementation places the stride at the first 1x1 convolution(self.conv1)
+    # according to "Deep residual learning for image recognition"https://arxiv.org/abs/1512.03385.
+    # This variant is also known as ResNet V1.5 and improves accuracy according to
+    # https://ngc.nvidia.com/catalog/model-scripts/nvidia:resnet_50_v1_5_for_pytorch.
+
+    expansion: int = 4
+
+    def __init__(
+        self,
+        inplanes: int,
+        planes: int,
+        stride: int = 1,
+        downsample: Optional[nn.Module] = None,
+        groups: int = 1,
+        base_width: int = 64,
+        dilation: int = 1,
+        norm_layer: Optional[Callable[..., nn.Module]] = None,
+        r:int = 16,
+    ) -> None:
+        super().__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm2d
+        width = int(planes * (base_width / 64.0)) * groups
+        # Both self.conv2 and self.downsample layers downsample the input when stride != 1
+        self.conv1 = conv1x1(inplanes, width)
+        self.bn1 = norm_layer(width)
+        self.conv2 = conv3x3(width, width, stride, groups, dilation)
+        self.bn2 = norm_layer(width)
+        self.conv3 = conv1x1(width, planes * self.expansion)
+        self.bn3 = norm_layer(planes * self.expansion)
+        self.relu = nn.ReLU(inplace=True)
+        self.downsample = downsample
+        self.stride = stride
+        # add SE block
+        self.cbam = cbam.CBAM(planes * self.expansion, r,use_gumbel=True,use_gumbel_cb=False)
 
     def forward(self, x: Tensor) -> Tensor:
         identity = x
@@ -809,7 +874,7 @@ def resnet152(pretrained: str = None, progress: bool = True,use_norm: str = None
     return _resnet("resnet152", Bottleneck, [3, 8, 36, 3], pretrained, progress,use_norm=use_norm, **kwargs)
 
 
-def se_resnet152(pretrained: str = None, progress: bool = True,use_norm: str = None,use_gumbel=False,  **kwargs: Any) -> ResNet:
+def se_resnet152(pretrained: str = None, progress: bool = True,use_norm: str = None,use_gumbel=False,use_gumbel_cb=False,  **kwargs: Any) -> ResNet:
     r"""ResNet-152 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
@@ -823,7 +888,7 @@ def se_resnet152(pretrained: str = None, progress: bool = True,use_norm: str = N
         return _resnet('resnet152', SEBottleneck, [3, 8, 36, 3], pretrained, progress,use_norm=use_norm,
                        **kwargs)
 
-def cb_resnet152(pretrained: str = None, progress: bool = True,use_norm: str = None,use_gumbel=False,  **kwargs: Any) -> ResNet:
+def cb_resnet152(pretrained: str = None, progress: bool = True,use_norm: str = None,use_gumbel=False,use_gumbel_cb=False,  **kwargs: Any) -> ResNet:
     r"""ResNet-152 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
@@ -831,7 +896,10 @@ def cb_resnet152(pretrained: str = None, progress: bool = True,use_norm: str = N
         progress (bool): If True, displays a progress bar of the download to stderr
     """
     if use_gumbel is True:
-        return _resnet("resnet152", CBAMBottleneckGumbel, [3, 8, 36, 3], pretrained, progress,use_norm=use_norm, **kwargs)
+        if use_gumbel_cb is False:
+            return _resnet("resnet152", CBAMBottleneckGumbelSigmoid, [3, 8, 36, 3], pretrained, progress,use_norm=use_norm, **kwargs)
+        else:
+            return _resnet("resnet152", CBAMBottleneckGumbel, [3, 8, 36, 3], pretrained, progress,use_norm=use_norm, **kwargs)
     else:
         return _resnet("resnet152", CBAMBottleneck, [3, 8, 36, 3], pretrained, progress,use_norm=use_norm, **kwargs)
 
@@ -847,7 +915,7 @@ def resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: str 
     kwargs["width_per_group"] = 4
     return _resnet("resnext50_32x4d", Bottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm, **kwargs)
 
-def se_resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: str = None,use_gumbel=False, **kwargs: Any) -> ResNet:
+def se_resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: str = None,use_gumbel=False,use_gumbel_cb=False, **kwargs: Any) -> ResNet:
     r"""ResNeXt-50 32x4d model from
     `"Aggregated Residual Transformation for Deep Neural Networks" <https://arxiv.org/pdf/1611.05431.pdf>`_.
     Args:
@@ -864,7 +932,7 @@ def se_resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: s
         return _resnet('resnext50_32x4d', SEBottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
                        **kwargs)
     
-def cb_resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: str = None,use_gumbel=False, **kwargs: Any) -> ResNet:
+def cb_resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: str = None,use_gumbel=False,use_gumbel_cb=False, **kwargs: Any) -> ResNet:
     r"""ResNeXt-50 32x4d model from
     `"Aggregated Residual Transformation for Deep Neural Networks" <https://arxiv.org/pdf/1611.05431.pdf>`_.
     Args:
@@ -874,9 +942,13 @@ def cb_resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: s
     kwargs["groups"] = 32
     kwargs["width_per_group"] = 4
     
-    if use_gumbel is True: 
-        return _resnet('resnext50_32x4d', CBAMBottleneckGumbel, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
-                       **kwargs)
+    if use_gumbel is True:
+        if use_gumbel_cb is False:
+            return _resnet('resnext50_32x4d', CBAMBottleneckGumbelSigmoid, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
+                           **kwargs)
+        else:
+            return _resnet('resnext50_32x4d', CBAMBottleneckGumbel, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
+                           **kwargs)
     else:
         return _resnet('resnext50_32x4d', CBAMBottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
                        **kwargs)
@@ -924,7 +996,7 @@ def wide_resnet101_2(pretrained: bool = False, progress: bool = True, **kwargs: 
     return _resnet("wide_resnet101_2", Bottleneck, [3, 4, 23, 3], pretrained, progress, **kwargs)
 
 
-def se_resnet50(pretrained=None, progress=True,use_norm=None,use_gumbel=False, **kwargs):
+def se_resnet50(pretrained=None, progress=True,use_norm=None,use_gumbel=False,use_gumbel_cb=False, **kwargs):
     if use_gumbel is True: 
         return _resnet('resnet50', SEBottleneckGumbel, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
                        **kwargs)
@@ -932,10 +1004,14 @@ def se_resnet50(pretrained=None, progress=True,use_norm=None,use_gumbel=False, *
         return _resnet('resnet50', SEBottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
                        **kwargs)
     
-def cb_resnet50(pretrained=None, progress=True,use_norm=None,use_gumbel=False, **kwargs):
-    if use_gumbel is True: 
-        return _resnet('resnet50', CBAMBottleneckGumbel, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
-                       **kwargs)
+def cb_resnet50(pretrained=None, progress=True,use_norm=None,use_gumbel=False,use_gumbel_cb=False,**kwargs):
+    if use_gumbel is True:
+        if use_gumbel_cb is False:
+            return _resnet('resnet50', CBAMBottleneckGumbelSigmoid, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
+                           **kwargs)
+        else:
+            return _resnet('resnet50', CBAMBottleneckGumbel, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
+                           **kwargs)
     else:
         return _resnet('resnet50', CBAMBottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
                        **kwargs)

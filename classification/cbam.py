@@ -89,17 +89,19 @@ class SpatialGate(nn.Module):
         x_out = self.spatial(x_compress)
         if self.use_gumbel is True:
             scale=torch.exp(-torch.exp(-torch.clamp(x_out,min=-4.0,max=10.0)))
+#             scale=1/2+torch.erf(torch.clamp(x_out,min=-8,max=8)/(2**(1/2)))/2 # normal activation
+#              scale=x_out.sigmoid()
         else:
             scale=x_out.sigmoid()
         return x * scale
 
 class CBAM(nn.Module):
-    def __init__(self, gate_channels, reduction_ratio=16, pool_types=['avg','max'], no_spatial=False,use_gumbel=False):
+    def __init__(self, gate_channels, reduction_ratio=16, pool_types=['avg','max'], no_spatial=False,use_gumbel=False,use_gumbel_cb=False):
         super(CBAM, self).__init__()
         self.ChannelGate = ChannelGate(gate_channels, reduction_ratio, pool_types,use_gumbel=use_gumbel)
         self.no_spatial=no_spatial
         if not no_spatial:
-            self.SpatialGate = SpatialGate(use_gumbel=use_gumbel)
+            self.SpatialGate = SpatialGate(use_gumbel=(use_gumbel_cb))
     def forward(self, x):
         x_out = self.ChannelGate(x)
         if not self.no_spatial:

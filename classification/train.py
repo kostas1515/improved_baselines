@@ -173,7 +173,7 @@ def finetune_places(model):
             pass
         model.fc.weight.requires_grad = True
     
-    for v in model.layer4[-1].parameters():
+    for v in model.layer4.parameters():
         v.requires_grad = True
         
 
@@ -534,6 +534,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('--imb_factor', default=0.01, type=float, help='imbalance factor')
     parser.add_argument("--model", default="resnet32", type=str, help="model name")
     parser.add_argument('--use_gumbel_se', default=False, help='Gumbel activation in excitation phase of SE',action='store_true')
+    parser.add_argument('--use_gumbel_cb', default=False, help='Gumbel activation in spatial attention phase of CB',action='store_true')
     parser.add_argument('--classif_norm', default=None,type=str, help='Type of classifier Normalisation {None,norm,cosine')
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
     parser.add_argument(

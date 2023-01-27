@@ -52,11 +52,15 @@ class NormedLinear(nn.Module):
         return out
 
 class CosNorm_Classifier(nn.Module):
-    def __init__(self, in_dims, out_dims, scale=16, margin=0.5, init_std=0.001):
+    def __init__(self, in_dims, out_dims, scale=16, margin=0.5, init_std=0.001,learnable=False):
         super(CosNorm_Classifier, self).__init__()
         self.in_features = in_dims
         self.out_dims = out_dims
         self.scale = scale
+        self.learnable = learnable
+        if self.learnable is True:
+            self.scale = Parameter(torch.FloatTensor(1).cuda())
+
         self.margin = margin
         self.weight = Parameter(torch.Tensor(out_dims, in_dims).cuda())
         self.reset_parameters() 
@@ -64,6 +68,8 @@ class CosNorm_Classifier(nn.Module):
     def reset_parameters(self):
         stdv = 1. / math.sqrt(self.weight.size(1))
         self.weight.data.uniform_(-stdv, stdv)
+        if self.learnable is True:
+            self.scale.data.fill_(5)
 
     def forward(self, input, *args):
         norm_x = torch.norm(input.clone(), 2, 1, keepdim=True)
@@ -71,7 +77,11 @@ class CosNorm_Classifier(nn.Module):
         ex = (norm_x / (1 + norm_x)) * (input / norm_x)
         # ex = input/ (1 + norm_x)
         ew = self.weight / torch.norm(self.weight, 2, 1, keepdim=True)
-        return torch.mm(self.scale * ex, ew.t())
+        
+        if self.learnable is True:
+            return torch.mm((self.scale**2) * ex, ew.t())
+        else:
+            return torch.mm(self.scale * ex, ew.t())
 
 class LambdaLayer(nn.Module):
 
@@ -247,7 +257,41 @@ class Cb_Block_Gumbel(nn.Module):
         self.bn1 = nn.BatchNorm2d(planes)
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
-        self.cb = cbam.CBAM(planes,reduction_ratio=4,use_gumbel=True)
+        self.cb = cbam.CBAM(planes,reduction_ratio=4,use_gumbel=True,use_gumbel_cb=True)
+
+
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_planes != planes:
+            if option == 'A':
+                """
+                For CIFAR10 ResNet paper uses option A.
+                """
+                self.shortcut = LambdaLayer(lambda x:
+                                            F.pad(x[:, :, ::2, ::2], (0, 0, 0, 0, planes//4, planes//4), "constant", 0))
+            elif option == 'B':
+                self.shortcut = nn.Sequential(
+                     nn.Conv2d(in_planes, self.expansion * planes, kernel_size=1, stride=stride, bias=False),
+                     nn.BatchNorm2d(self.expansion * planes)
+                )
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out = self.cb(out)
+        out += self.shortcut(x)
+        out = F.relu(out)
+        return out
+    
+class Cb_Block_GumbelSigmoid(nn.Module):
+    expansion = 1
+
+    def __init__(self, in_planes, planes, stride=1, option='A'):
+        super(Cb_Block_GumbelSigmoid, self).__init__()
+        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(planes)
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(planes)
+        self.cb = cbam.CBAM(planes,reduction_ratio=4,use_gumbel=True,use_gumbel_cb=False)
 
 
         self.shortcut = nn.Sequential()
@@ -423,17 +467,20 @@ def resnet20():
 def resnet32(num_classes=10, use_norm=None):
     return ResNet_s(BasicBlock, [5, 5, 5], num_classes=num_classes, use_norm=use_norm)
 
-def se_resnet32(num_classes=10, use_norm=None,use_gumbel=False):
+def se_resnet32(num_classes=10, use_norm=None,use_gumbel=False,use_gumbel_cb=False):
     if use_gumbel is False:
         return ResNet_s(Se_Block, [5, 5, 5], num_classes=num_classes, use_norm=use_norm)
     else:
         return ResNet_s(Se_Block_Gumbel, [5, 5, 5], num_classes=num_classes, use_norm=use_norm)
     
-def cb_resnet32(num_classes=10, use_norm=None,use_gumbel=False):
+def cb_resnet32(num_classes=10, use_norm=None,use_gumbel=False,use_gumbel_cb=False):
     if use_gumbel is False:
         return ResNet_s(Cb_Block, [5, 5, 5], num_classes=num_classes, use_norm=use_norm)
     else:
-        return ResNet_s(Cb_Block_Gumbel, [5, 5, 5], num_classes=num_classes, use_norm=use_norm)
+        if use_gumbel_cb is True:
+            return ResNet_s(Cb_Block_Gumbel, [5, 5, 5], num_classes=num_classes, use_norm=use_norm)
+        else:
+            return ResNet_s(Cb_Block_GumbelSigmoid, [5, 5, 5], num_classes=num_classes, use_norm=use_norm)
 
 def con_resnet32(num_classes=10, use_norm=None):
     return ResNet_Contrastive(BasicBlock, [5, 5, 5], num_classes=num_classes, use_norm=use_norm)
