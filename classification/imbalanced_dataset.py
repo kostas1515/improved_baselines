@@ -9,7 +9,10 @@ from PIL import Image
 from catalyst.data import  BalanceClassSampler,DistributedSamplerWrapper
 from torchvision.transforms.functional import InterpolationMode
 import torchvision.datasets as datasets
-import presets
+try:
+    import presets
+except ModuleNotFoundError:
+    from classification import presets
 
 
 class IMBALANCECIFAR10(torchvision.datasets.CIFAR10):

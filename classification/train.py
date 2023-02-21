@@ -3,20 +3,34 @@ import os
 import time
 import warnings
 
-import presets
+
 import torch
 import torch.utils.data
 import torchvision
 import torchvision.models as models
-import transforms
-import utils
-from sampler import RASampler
+
+try:
+    import presets
+    import transforms
+    import utils
+    from sampler import RASampler
+    import resnet_pytorch
+    import imbalanced_dataset
+    import initialise_model
+except ModuleNotFoundError:
+    from classification import presets
+    from classification import transforms
+    from classification import utils
+    from classification.sampler import RASampler
+    from classification import resnet_pytorch
+    from classification import imbalanced_dataset
+    from classification import initialise_model
+    
+
 from torch import nn
 from torch.utils.data.dataloader import default_collate
 from torchvision.transforms.functional import InterpolationMode
-import resnet_pytorch
-import imbalanced_dataset
-import initialise_model 
+
 from catalyst.data import  BalanceClassSampler,DistributedSamplerWrapper
 
 try:
@@ -97,7 +111,8 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
             target = target.to(device, non_blocking=True)
             output = model(image)
             loss = criterion(output, target)
-
+            if hasattr(criterion, "iif"):
+                output = criterion(output, infer=True)
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             # FIXME need to take into account that the datasets
             # could have been padded in distributed setup
@@ -156,22 +171,13 @@ def finetune_places(model):
 #     print(model)
     for v in model.parameters():
         v.requires_grad = False
+    
+    torch.nn.init.xavier_uniform_(model.fc.weight)
     try:
-        torch.nn.init.xavier_uniform_(model.linear.weight)
-        model.linear.weight.requires_grad = True
-        try:
-            model.linear.bias.data.fill_(0.01)
-            model.linear.bias.requires_grad = True
-        except AttributeError:
-            pass
+        model.fc.bias.requires_grad = True
     except AttributeError:
-        torch.nn.init.xavier_uniform_(model.fc.weight)
-        try:
-            model.fc.bias.requires_grad = True
-            model.fc.bias.data.fill_(0.01)
-        except AttributeError:
-            pass
-        model.fc.weight.requires_grad = True
+        pass
+    model.fc.weight.requires_grad = True
     
     for v in model.layer4.parameters():
         v.requires_grad = True
@@ -353,12 +359,13 @@ def main(args):
 
     print("Creating model")
     model = initialise_model.get_model(args,num_classes)
+#     model = initialise_model.initialise_classifier(args,model,num_classes)
     model.to(device)
 
     if args.distributed and args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
-    criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
+    criterion = initialise_model.get_criterion(args,dataset)
 
     custom_keys_weight_decay = []
     if args.bias_weight_decay is not None:
@@ -472,6 +479,10 @@ def main(args):
             scaler.load_state_dict(checkpoint["scaler"])
         elif args.apex:
             amp.load_state_dict(checkpoint["amp"])
+            
+    if args.load_from:
+        checkpoint = torch.load(args.load_from, map_location="cpu")
+        model_without_ddp.load_state_dict(checkpoint["model"])
 
     if args.test_only:
         # We disable the cudnn benchmarking because it can noticeably affect the accuracy
@@ -536,6 +547,8 @@ def get_args_parser(add_help=True):
     parser.add_argument('--use_gumbel_se', default=False, help='Gumbel activation in excitation phase of SE',action='store_true')
     parser.add_argument('--use_gumbel_cb', default=False, help='Gumbel activation in spatial attention phase of CB',action='store_true')
     parser.add_argument('--classif_norm', default=None,type=str, help='Type of classifier Normalisation {None,norm,cosine')
+    parser.add_argument('--criterion', default='ce',type=str, help='Criterion used for classifier {ce,bce,gce')
+    
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
     parser.add_argument(
         "-b", "--batch-size", default=32, type=int, help="images per gpu, the total batch size is $NGPU x batch_size"
@@ -594,6 +607,7 @@ def get_args_parser(add_help=True):
     parser.add_argument("--print-freq", default=100, type=int, help="print frequency")
     parser.add_argument("--output-dir", default=".", type=str, help="path to save outputs")
     parser.add_argument("--resume", default="", type=str, help="path of checkpoint")
+    parser.add_argument("--load_from", default="", type=str, help="path of checkpoint")
     parser.add_argument("--start-epoch", default=0, type=int, metavar="N", help="start epoch")
     parser.add_argument(
         "--cache-dataset",
@@ -618,6 +632,7 @@ def get_args_parser(add_help=True):
     parser.add_argument("--augmix-severity", default=3, type=int, help="severity of augmix policy")
     parser.add_argument("--random-erase", default=0.0, type=float, help="random erasing probability (default: 0.0)")
     parser.add_argument('--sampler', default='random', type=str, help='sampling, [random,upsampling,downsampling]')
+    parser.add_argument('--reduction', default='mean', type=str, help='reduce mini batch')
 
     # Mixed precision training parameters
     parser.add_argument("--amp", action="store_true", help="Use torch.cuda.amp for mixed precision training")
@@ -625,6 +640,11 @@ def get_args_parser(add_help=True):
     # distributed training parameters
     parser.add_argument("--world-size", default=1, type=int, help="number of distributed processes")
     parser.add_argument("--dist-url", default="env://", type=str, help="url used to set up distributed training")
+    parser.add_argument(
+        "--deffered",
+        help="Use deferred schedule",
+        action="store_true",
+    )
     parser.add_argument(
         "--model-ema", action="store_true", help="enable tracking Exponential Moving Average of model parameters"
     )

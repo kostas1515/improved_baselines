@@ -3,7 +3,8 @@ import cv2
 import numpy as np
 import torchvision.transforms as transforms
 import torch
-
+from classification.resnet_pytorch import SE_Block
+from classification.cbam import SpatialGate
 
 class ResNetCam(nn.Module):
     def __init__(self,model,synset_loc='../../../datasets/ILSVRC/LOC_synset_mapping.txt',dataset='ImageNet-LT'):
@@ -117,4 +118,115 @@ class ResNetCam(nn.Module):
         
         return im2,
         
+    
+
+
+
+def find_modules(nn_module, type):
+    return [module for module in nn_module.modules() if isinstance(module, type)]
+
+class SERecorder(nn.Module):
+    def __init__(self, model, device = None,part='excitation'):
+        super().__init__()
+        self.model = model
+
+        self.data = None
+        self.recordings = []
+        self.hooks = []
+        self.hook_registered = False
+        self.ejected = False
+        self.device = device
+        self.part = part
+
+    def _hook(self, _, input, output):
+        self.recordings.append(output.clone().detach())
+
+    def _register_hook(self):
+        modules = find_modules(self.model, SE_Block)
+        for module in modules:
+            if self.part =='excitation':
+                handle = module.excitation.register_forward_hook(self._hook)
+            elif self.part =='gap':
+                handle = module.squeeze.register_forward_hook(self._hook)
+            self.hooks.append(handle)
+        self.hook_registered = True
+
+    def eject(self):
+        self.ejected = True
+        for hook in self.hooks:
+            hook.remove()
+        self.hooks.clear()
+        return self.model
+
+    def clear(self):
+        self.recordings.clear()
+
+    def record(self, attn):
+        recording = attn.clone().detach()
+        self.recordings.append(recording)
+
+    def forward(self, img):
+        assert not self.ejected, 'recorder has been ejected, cannot be used anymore'
+        self.clear()
+        if not self.hook_registered:
+            self._register_hook()
+
+        pred = self.model(img)
+
+        # move all recordings to one device before stacking
+        target_device = self.device if self.device is not None else img.device
+        recordings = tuple(map(lambda t: t.to(target_device), self.recordings)) 
+        attns = recordings if len(recordings) > 0 else None
+        return pred, attns
         
+        
+        
+class CBAMRecorder(nn.Module):
+    def __init__(self, model, device = None):
+        super().__init__()
+        self.model = model
+
+        self.data = None
+        self.recordings = []
+        self.hooks = []
+        self.hook_registered = False
+        self.ejected = False
+        self.device = device
+
+    def _hook(self, _, input, output):
+        self.recordings.append(output.clone().detach())
+
+    def _register_hook(self):
+        modules = find_modules(self.model, SpatialGate)
+        for module in modules:
+            handle = module.spatial.register_forward_hook(self._hook)
+            self.hooks.append(handle)
+        self.hook_registered = True
+
+    def eject(self):
+        self.ejected = True
+        for hook in self.hooks:
+            hook.remove()
+        self.hooks.clear()
+        return self.model
+
+    def clear(self):
+        self.recordings.clear()
+
+    def record(self, attn):
+        recording = attn.clone().detach()
+        self.recordings.append(recording)
+
+    def forward(self, img):
+        assert not self.ejected, 'recorder has been ejected, cannot be used anymore'
+        self.clear()
+        if not self.hook_registered:
+            self._register_hook()
+
+        pred = self.model(img)
+
+        # move all recordings to one device before stacking
+        target_device = self.device if self.device is not None else img.device
+        recordings = tuple(map(lambda t: t.to(target_device), self.recordings)) 
+        attns = recordings if len(recordings) > 0 else None
+        return pred, attns

@@ -47,13 +47,8 @@ class Attention(nn.Module):
         self.heads = heads
         self.scale = dim_head ** -0.5
         self.norm = nn.LayerNorm(dim)
-        
-        if attention == 'softmax':
-            self.attend = nn.Softmax(dim = -1)
-        elif attention == 'sigmoid':
-            self.attend = nn.Sigmoid()
-        elif attention == 'gumbel':
-            self.attend = SoftGumbel()
+        self.attention = attention
+        self.attend = nn.Softmax(dim = -1)
             
             
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
@@ -66,8 +61,12 @@ class Attention(nn.Module):
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
 
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
-
-        attn = self.attend(dots)
+        
+        if self.attention =='gumbel':
+            gumbel_gain = torch.exp(-torch.exp(-torch.clamp(dots,min=-4.0,max=10.0)))
+            attn = self.attend(dots) *gumbel_gain
+        else:
+            attn = self.attend(dots)
 
         out = torch.matmul(attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')

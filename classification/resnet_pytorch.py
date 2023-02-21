@@ -3,6 +3,7 @@ from typing import Type, Any, Callable, Union, List, Optional
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.nn import Parameter
 try:
     import resnet_cifar
     import cbam 
@@ -430,22 +431,31 @@ class ResNet_TwoBranch(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
+    
+class GueluAdd(nn.Module):
+    def forward(self, input):
+        return input+(torch.exp(-torch.exp(-torch.clamp(input,min=-4,max=10))))
 
 class SE_Block(nn.Module):
     "credits: https://github.com/moskomule/senet.pytorch/blob/master/senet/se_module.py#L4"
     def __init__(self, c, r=16,use_gumbel=False):
         super().__init__()
         self.squeeze = nn.AdaptiveAvgPool2d(1)
+        
         self.excitation = nn.Sequential(
             nn.Linear(c, c // r, bias=False),
             nn.ReLU(inplace=True),
             nn.Linear(c // r, c, bias=False)
         )
         self.use_gumbel = use_gumbel
+        if self.use_gumbel is True:
+            self.reweight = GueluAdd()
 
     def forward(self, x):
         bs, c, _, _ = x.shape
         y = self.squeeze(x).view(bs, c)
+        if self.use_gumbel is True:
+            y = self.reweight(y)
         y = self.excitation(y).view(bs, c, 1, 1)
         if self.use_gumbel is True:
             y=torch.exp(-torch.exp(-torch.clamp(y,min=-4.0,max=10.0)))
@@ -781,7 +791,7 @@ def _mismatched_classifier(model,arch,pretrained):
         model.load_state_dict(state_dict)
     else:
         state_dict = torch.load(pretrained, map_location='cpu')
-        model.load_state_dict(state_dict['model'])
+        model.load_state_dict(state_dict['model'],strict=False)
 
     classifier_name, new_classifier = model._modules.popitem()
     model.add_module(classifier_name, old_classifier)
@@ -862,6 +872,18 @@ def resnet101(pretrained: bool = False, progress: bool = True, **kwargs: Any) ->
         progress (bool): If True, displays a progress bar of the download to stderr
     """
     return _resnet("resnet101", Bottleneck, [3, 4, 23, 3], pretrained, progress, **kwargs)
+
+def se_resnet101(pretrained: bool = False, progress: bool = True,use_norm: str = None,use_gumbel=False,use_gumbel_cb=False, **kwargs: Any) -> ResNet:
+    r"""ResNet-101 model from
+    `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
+    Args:
+        pretrained (bool): If True, returns a model pre-trained on ImageNet
+        progress (bool): If True, displays a progress bar of the download to stderr
+    """
+    if use_gumbel is True:
+        return _resnet("resnet101", SEBottleneckGumbel, [3, 4, 23, 3], pretrained, progress,use_norm=use_norm, **kwargs)
+    else:
+        return _resnet("resnet101", SEBottleneck, [3, 4, 23, 3], pretrained, progress,use_norm=use_norm, **kwargs)
 
 
 def resnet152(pretrained: str = None, progress: bool = True,use_norm: str = None,  **kwargs: Any) -> ResNet:

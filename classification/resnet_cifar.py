@@ -91,13 +91,18 @@ class LambdaLayer(nn.Module):
 
     def forward(self, x):
         return self.lambd(x)
+    
+
+class GueluAdd(nn.Module):
+    def forward(self, input):
+        return input+(torch.exp(-torch.exp(-torch.clamp(input,min=-4,max=10))))
 
 class SE_Block(nn.Module):
     "credits: https://github.com/moskomule/senet.pytorch/blob/master/senet/se_module.py#L4"
     def __init__(self, c, r=4,use_gumbel=False):
         super().__init__()
+        self.reweight = GueluAdd()
         self.squeeze = nn.AdaptiveAvgPool2d(1)
-        # self.squeeze = nn.AdaptiveMaxPool2d(1)
         self.excitation = nn.Sequential(
             nn.Linear(c, c // r, bias=False),
             nn.ReLU(inplace=True),
@@ -109,6 +114,8 @@ class SE_Block(nn.Module):
     def forward(self, x):
         bs, c, _, _ = x.shape
         y = self.squeeze(x).view(bs, c)
+        y = self.reweight(y) #kati ekane to additive
+        
         y = self.excitation(y).view(bs, c, 1, 1)
         if self.use_gumbel is True:
             y=torch.exp(-torch.exp(-torch.clamp(y,min=-4.0,max=10.0)))
