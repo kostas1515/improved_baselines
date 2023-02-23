@@ -38,7 +38,7 @@ def _weights_init(m):
     classname = m.__class__.__name__
     if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
         init.kaiming_normal_(m.weight)
-
+    
 class NormedLinear(nn.Module):
 
     def __init__(self, in_features, out_features):
@@ -92,16 +92,10 @@ class LambdaLayer(nn.Module):
     def forward(self, x):
         return self.lambd(x)
     
-
-class GueluAdd(nn.Module):
-    def forward(self, input):
-        return input+(torch.exp(-torch.exp(-torch.clamp(input,min=-4,max=10))))
-
 class SE_Block(nn.Module):
     "credits: https://github.com/moskomule/senet.pytorch/blob/master/senet/se_module.py#L4"
     def __init__(self, c, r=4,use_gumbel=False):
         super().__init__()
-        self.reweight = GueluAdd()
         self.squeeze = nn.AdaptiveAvgPool2d(1)
         self.excitation = nn.Sequential(
             nn.Linear(c, c // r, bias=False),
@@ -114,8 +108,6 @@ class SE_Block(nn.Module):
     def forward(self, x):
         bs, c, _, _ = x.shape
         y = self.squeeze(x).view(bs, c)
-        y = self.reweight(y) #kati ekane to additive
-        
         y = self.excitation(y).view(bs, c, 1, 1)
         if self.use_gumbel is True:
             y=torch.exp(-torch.exp(-torch.clamp(y,min=-4.0,max=10.0)))
@@ -133,7 +125,7 @@ class BasicBlock(nn.Module):
         self.bn1 = nn.BatchNorm2d(planes)
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
-
+        
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != planes:
             if option == 'A':
@@ -149,10 +141,11 @@ class BasicBlock(nn.Module):
                 )
 
     def forward(self, x):
-        out = F.relu(self.bn1(self.conv1(x)))
+        out = F.relu(self.bn1(self.conv1(x)))        
         out = self.bn2(self.conv2(out))
         out += self.shortcut(x)
         out = F.relu(out)
+        
         return out
 
 class Se_Block(nn.Module):
@@ -165,7 +158,6 @@ class Se_Block(nn.Module):
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
         self.se = SE_Block(planes)
-
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != planes:
             if option == 'A':
@@ -198,7 +190,6 @@ class Se_Block_Gumbel(nn.Module):
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
         self.se = SE_Block(planes,use_gumbel=True)
-
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != planes:
             if option == 'A':
@@ -214,11 +205,12 @@ class Se_Block_Gumbel(nn.Module):
                 )
 
     def forward(self, x):
-        out = F.relu(self.bn1(self.conv1(x)))
+        out = F.relu(self.bn1(self.conv1(x)))        
         out = self.bn2(self.conv2(out))
         out = self.se(out)
         out += self.shortcut(x)
         out = F.relu(out)
+
         return out
 
     

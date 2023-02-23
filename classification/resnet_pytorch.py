@@ -432,9 +432,6 @@ class ResNet_TwoBranch(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
     
-class GueluAdd(nn.Module):
-    def forward(self, input):
-        return input+(torch.exp(-torch.exp(-torch.clamp(input,min=-4,max=10))))
 
 class SE_Block(nn.Module):
     "credits: https://github.com/moskomule/senet.pytorch/blob/master/senet/se_module.py#L4"
@@ -448,14 +445,11 @@ class SE_Block(nn.Module):
             nn.Linear(c // r, c, bias=False)
         )
         self.use_gumbel = use_gumbel
-        if self.use_gumbel is True:
-            self.reweight = GueluAdd()
 
     def forward(self, x):
         bs, c, _, _ = x.shape
         y = self.squeeze(x).view(bs, c)
-        if self.use_gumbel is True:
-            y = self.reweight(y)
+        
         y = self.excitation(y).view(bs, c, 1, 1)
         if self.use_gumbel is True:
             y=torch.exp(-torch.exp(-torch.clamp(y,min=-4.0,max=10.0)))
@@ -629,6 +623,132 @@ class CBAMBottleneckGumbel(nn.Module):
         self.stride = stride
         # add SE block
         self.cbam = cbam.CBAM(planes * self.expansion, r,use_gumbel=True,use_gumbel_cb=True)
+
+    def forward(self, x: Tensor) -> Tensor:
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu(out)
+
+        out = self.conv3(out)
+        out = self.bn3(out)
+
+        # Add SE operation
+        out = self.cbam(out)
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out += identity
+        out = self.relu(out)
+
+        return out
+    
+class SpatialBottleneckGumbel(nn.Module):
+    # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
+    # while original implementation places the stride at the first 1x1 convolution(self.conv1)
+    # according to "Deep residual learning for image recognition"https://arxiv.org/abs/1512.03385.
+    # This variant is also known as ResNet V1.5 and improves accuracy according to
+    # https://ngc.nvidia.com/catalog/model-scripts/nvidia:resnet_50_v1_5_for_pytorch.
+
+    expansion: int = 4
+
+    def __init__(
+        self,
+        inplanes: int,
+        planes: int,
+        stride: int = 1,
+        downsample: Optional[nn.Module] = None,
+        groups: int = 1,
+        base_width: int = 64,
+        dilation: int = 1,
+        norm_layer: Optional[Callable[..., nn.Module]] = None,
+        r:int = 16,
+    ) -> None:
+        super().__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm2d
+        width = int(planes * (base_width / 64.0)) * groups
+        # Both self.conv2 and self.downsample layers downsample the input when stride != 1
+        self.conv1 = conv1x1(inplanes, width)
+        self.bn1 = norm_layer(width)
+        self.conv2 = conv3x3(width, width, stride, groups, dilation)
+        self.bn2 = norm_layer(width)
+        self.conv3 = conv1x1(width, planes * self.expansion)
+        self.bn3 = norm_layer(planes * self.expansion)
+        self.relu = nn.ReLU(inplace=True)
+        self.downsample = downsample
+        self.stride = stride
+        # add SE block
+        self.cbam = cbam.CBAM(planes * self.expansion, r,use_gumbel=True,use_gumbel_cb=True,no_channel=True)
+
+    def forward(self, x: Tensor) -> Tensor:
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu(out)
+
+        out = self.conv3(out)
+        out = self.bn3(out)
+
+        # Add SE operation
+        out = self.cbam(out)
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out += identity
+        out = self.relu(out)
+
+        return out
+
+class SpatialBottleneck(nn.Module):
+    # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
+    # while original implementation places the stride at the first 1x1 convolution(self.conv1)
+    # according to "Deep residual learning for image recognition"https://arxiv.org/abs/1512.03385.
+    # This variant is also known as ResNet V1.5 and improves accuracy according to
+    # https://ngc.nvidia.com/catalog/model-scripts/nvidia:resnet_50_v1_5_for_pytorch.
+
+    expansion: int = 4
+
+    def __init__(
+        self,
+        inplanes: int,
+        planes: int,
+        stride: int = 1,
+        downsample: Optional[nn.Module] = None,
+        groups: int = 1,
+        base_width: int = 64,
+        dilation: int = 1,
+        norm_layer: Optional[Callable[..., nn.Module]] = None,
+        r:int = 16,
+    ) -> None:
+        super().__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm2d
+        width = int(planes * (base_width / 64.0)) * groups
+        # Both self.conv2 and self.downsample layers downsample the input when stride != 1
+        self.conv1 = conv1x1(inplanes, width)
+        self.bn1 = norm_layer(width)
+        self.conv2 = conv3x3(width, width, stride, groups, dilation)
+        self.bn2 = norm_layer(width)
+        self.conv3 = conv1x1(width, planes * self.expansion)
+        self.bn3 = norm_layer(planes * self.expansion)
+        self.relu = nn.ReLU(inplace=True)
+        self.downsample = downsample
+        self.stride = stride
+        # add SE block
+        self.cbam = cbam.CBAM(planes * self.expansion, r,use_gumbel=False,use_gumbel_cb=False,no_channel=True)
 
     def forward(self, x: Tensor) -> Tensor:
         identity = x
@@ -850,7 +970,7 @@ def resnet34(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> 
     return _resnet("resnet34", BasicBlock, [3, 4, 6, 3], pretrained, progress, **kwargs)
 
 
-def resnet50(pretrained: str = None, progress: bool = True,use_norm: str = None, **kwargs: Any) -> ResNet:
+def resnet50(pretrained: str = None, progress: bool = True,use_norm: str = None,use_gumbel=False,use_gumbel_cb=False, **kwargs: Any) -> ResNet:
     r"""ResNet-50 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
@@ -975,6 +1095,24 @@ def cb_resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: s
         return _resnet('resnext50_32x4d', CBAMBottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
                        **kwargs)
 
+    
+def sp_resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: str = None,use_gumbel=False,use_gumbel_cb=False, **kwargs: Any) -> ResNet:
+    r"""ResNeXt-50 32x4d model from
+    `"Aggregated Residual Transformation for Deep Neural Networks" <https://arxiv.org/pdf/1611.05431.pdf>`_.
+    Args:
+        pretrained (bool): If True, returns a model pre-trained on ImageNet
+        progress (bool): If True, displays a progress bar of the download to stderr
+    """
+    kwargs["groups"] = 32
+    kwargs["width_per_group"] = 4
+    
+    if use_gumbel is True:
+        return _resnet('resnext50_32x4d', SpatialBottleneckGumbel, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
+                       **kwargs)
+    else:
+        return _resnet('resnext50_32x4d', SpatialBottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
+                       **kwargs)
+
 
 def resnext101_32x8d(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNet:
     r"""ResNeXt-101 32x8d model from
@@ -1036,5 +1174,14 @@ def cb_resnet50(pretrained=None, progress=True,use_norm=None,use_gumbel=False,us
                            **kwargs)
     else:
         return _resnet('resnet50', CBAMBottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
+                       **kwargs)
+    
+    
+def sp_resnet50(pretrained=None, progress=True,use_norm=None,use_gumbel=False,use_gumbel_cb=False,**kwargs):
+    if use_gumbel is True:
+        return _resnet('resnet50', SpatialBottleneckGumbel, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
+                           **kwargs)
+    else:
+        return _resnet('resnet50', SpatialBottleneck, [3, 4, 6, 3], pretrained, progress,use_norm=use_norm,
                        **kwargs)
         
