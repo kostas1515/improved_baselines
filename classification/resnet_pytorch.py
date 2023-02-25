@@ -1046,7 +1046,7 @@ def cb_resnet152(pretrained: str = None, progress: bool = True,use_norm: str = N
         return _resnet("resnet152", CBAMBottleneck, [3, 8, 36, 3], pretrained, progress,use_norm=use_norm, **kwargs)
 
 
-def resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: str = None, **kwargs: Any) -> ResNet:
+def resnext50_32x4d(pretrained: str = None, progress: bool = True,use_norm: str = None,use_gumbel=False,use_gumbel_cb=False, **kwargs: Any) -> ResNet:
     r"""ResNeXt-50 32x4d model from
     `"Aggregated Residual Transformation for Deep Neural Networks" <https://arxiv.org/pdf/1611.05431.pdf>`_.
     Args:

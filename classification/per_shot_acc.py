@@ -12,6 +12,7 @@ try:
 except ImportError:
     amp = None
 import train
+import initialise_model
 
 def main(args):
     dset_name = args.dset_name
@@ -27,7 +28,10 @@ def main(args):
 
     print(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se},pretrained="{None}")')
     model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se},pretrained="{None}")')
-
+    
+    model = initialise_model.get_model(args,num_classes)
+    criterion = initialise_model.get_criterion(args,dataset)
+    
     checkpoint = torch.load(args.load_from, map_location='cpu')
     model.load_state_dict(checkpoint['model'])
 
@@ -39,7 +43,7 @@ def main(args):
                                           opt_level=args.apex_opt_level
                                           )
 
-    avg_acc,preds,targets=evaluate(model.cuda(), data_loader_test, device='cuda')
+    avg_acc,preds,targets=evaluate(model.cuda(), data_loader_test, device='cuda',criterion=criterion)
 
     print(f'Avg Acc is: {avg_acc}')
 
@@ -99,7 +103,7 @@ def shot_acc (preds, labels, train_targets, many_shot_thr=100, low_shot_thr=20, 
 
 
 
-def evaluate(model, data_loader, device, print_freq=10):
+def evaluate(model, data_loader, device, print_freq=10,criterion=None):
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
@@ -110,13 +114,8 @@ def evaluate(model, data_loader, device, print_freq=10):
             image = image.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
             output = model(image)
-#             loss = criterion(output, target)
-#             if (type(output)==tuple):
-#                 out=criterion(output,infer=True)
-#                 acc1, acc5 = utils.accuracy(out, target, topk=(1, 5))
-#             else:
-#                 if hasattr(criterion, 'iif'):
-#                     output=criterion(output,infer=True)
+            if hasattr(criterion, 'iif'):
+                output=criterion(output,infer=True)
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
                 
             predictions=list(chain(predictions,output.argmax(axis=1).tolist()))
@@ -155,6 +154,9 @@ def get_args_parser():
     parser.add_argument('-b', '--batch-size', default=256, type=int)
     parser.add_argument('--model', default='resnet50', help='model, E.g.(se_resnext50_32x4d)')
     parser.add_argument('--use_gumbel_se', default=False, help='Gumbel activation in excitation phase of SE',action='store_true')
+    parser.add_argument('--use_gumbel_cb', default=False, help='Gumbel activation in spatial gate phase of CB',action='store_true')
+    
+    parser.add_argument('--criterion', default='ce',type=str, help='Criterion used for classifier {ce,bce,gce')
     
     parser.add_argument('--apex', action='store_true',
                         help='Use apex for mixed precision training')

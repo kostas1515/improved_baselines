@@ -44,6 +44,7 @@ def get_model(args,num_classes):
     else:
         try:
             # model = torchvision.models.__dict__[args.model](pretrained=args.pretrained,num_classes=num_classes)
+            print(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se},use_gumbel_cb={args.use_gumbel_cb},pretrained="{args.pretrained}")')
             model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se},use_gumbel_cb={args.use_gumbel_cb},pretrained="{args.pretrained}")')
         except AttributeError:
             #model does not exist in pytorch load it from resnet_cifar
@@ -68,7 +69,7 @@ def get_criterion(args,dataset):
     elif args.criterion =='gce':
         return custom.BCE(label_smoothing=args.label_smoothing,use_gumbel=True,weight=weight,reduction=args.reduction)
     elif args.criterion =='iif':
-        return custom.IIFLoss(dataset,weight=weight,reduction=args.reduction)
+        return custom.IIFLoss(dataset,weight=weight,reduction=args.reduction,variant=args.iif)
     elif args.criterion =='bce':
         return custom.BCE(label_smoothing=args.label_smoothing,reduction=args.reduction)
     elif args.criterion =='softmax_gumbel_ce':

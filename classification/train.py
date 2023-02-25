@@ -633,6 +633,8 @@ def get_args_parser(add_help=True):
     parser.add_argument("--random-erase", default=0.0, type=float, help="random erasing probability (default: 0.0)")
     parser.add_argument('--sampler', default='random', type=str, help='sampling, [random,upsampling,downsampling]')
     parser.add_argument('--reduction', default='mean', type=str, help='reduce mini batch')
+    parser.add_argument('--iif', default='raw',type=str, help='Type of IIF variant- applicable if classif iif')
+    
 
     # Mixed precision training parameters
     parser.add_argument("--amp", action="store_true", help="Use torch.cuda.amp for mixed precision training")

@@ -67,7 +67,7 @@ class SoftmaxGumbel(nn.Module):
 
 class IIFLoss(nn.Module):
     # BCEwithLogitLoss() with reduced missing label effects.
-    def __init__(self,dataset,variant='raw',iif_norm=0,reduction='mean',device='cuda',weight=None):
+    def __init__(self,dataset,variant='rel',iif_norm=0,reduction='mean',device='cuda',weight=None):
         super(IIFLoss, self).__init__()
         self.loss_fcn = nn.CrossEntropyLoss(reduction='none',weight=weight)
         self.reduction=reduction
