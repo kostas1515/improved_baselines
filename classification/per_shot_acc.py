@@ -25,13 +25,9 @@ def main(args):
     data_loader_test = torch.utils.data.DataLoader(
         dataset_test, batch_size=args.batch_size,
         sampler=test_sampler, num_workers=args.workers, pin_memory=True)
-
-    print(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se},pretrained="{None}")')
-    model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se},pretrained="{None}")')
     
     model = initialise_model.get_model(args,num_classes)
     criterion = initialise_model.get_criterion(args,dataset)
-    
     checkpoint = torch.load(args.load_from, map_location='cpu')
     model.load_state_dict(checkpoint['model'])
 
@@ -172,6 +168,9 @@ def get_args_parser():
     parser.add_argument(
         "--train-crop-size", default=224, type=int, help="the random crop size used for training (default: 224)"
     )
+    parser.add_argument(
+        "--label-smoothing", default=0.0, type=float, help="label smoothing (default: 0.0)", dest="label_smoothing"
+    )
     parser.add_argument('--apex-opt-level', default='O2', type=str,
                         help='For apex mixed precision training'
                              'O0 for FP32 training, O1 for mixed precision training.'
@@ -183,7 +182,19 @@ def get_args_parser():
         help="Cache the datasets for quicker initialization. It also serializes the transforms",
         action="store_true",
     )
+    parser.add_argument(
+        "--deffered",
+        help="Use deferred schedule",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--pretrained",
+        dest="pretrained",
+        help="Use pre-trained models from the modelzoo or local --> [pytorch, path-to-model]",
+        default=None, type=str,
+    )
     parser.add_argument("--weights", default=None, type=str, help="Dummy input, do not change")
+    parser.add_argument('--reduction', default='mean', type=str, help='reduce mini batch')
     parser.add_argument(
         "--test-only",
         dest="test_only",

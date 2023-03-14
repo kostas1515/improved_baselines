@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 try:
     from vit_pytorch import SimpleViT
     from vit_pytorch.cait import CaiT
@@ -10,6 +11,21 @@ except ModuleNotFoundError:
     from classification import resnet_cifar
     from classification import custom
 
+def _mismatched_classifier(model,pretrained):
+    classifier_name, old_classifier = model._modules.popitem()
+    classifier_input_size = old_classifier[1].in_features
+    
+    pretrained_classifier = nn.Sequential(
+                nn.LayerNorm(classifier_input_size),
+                nn.Linear(classifier_input_size, 1000)
+            )
+    model.add_module(classifier_name, pretrained_classifier)
+    state_dict = torch.load(pretrained, map_location='cpu')
+    model.load_state_dict(state_dict['model'],strict=False)
+
+    classifier_name, new_classifier = model._modules.popitem()
+    model.add_module(classifier_name, old_classifier)
+    return model
 
 def get_model(args,num_classes):
     if args.model.endswith('vit') is True:
@@ -26,21 +42,11 @@ def get_model(args,num_classes):
                     depth = 12,
                     heads = 6,
                     mlp_dim = 1536,
-                    attention=attention)
-        elif args.model == 'ca_vit':
-            model = CaiT(
-                    image_size = args.train_crop_size,
-                    patch_size = 16,
-                    num_classes = num_classes,
-                    dim = 384,
-                    depth = 12,             # depth of transformer for patch to patch attention only
-                    cls_depth = 2,          # depth of cross attention of CLS tokens to patch
-                    heads = 6,
-                    mlp_dim = 1536,
-                    dropout = 0.1,
-                    emb_dropout = 0.1,
-                    layer_dropout = 0.05,   # randomly dropout 5% of the layers
-                    attention=attention)
+                    attention=attention,
+                    use_norm=args.classif_norm)
+        if args.pretrained is not None:
+            if num_classes!=1000:
+                model = _mismatched_classifier(model,args.pretrained)
     else:
         try:
             # model = torchvision.models.__dict__[args.model](pretrained=args.pretrained,num_classes=num_classes)
@@ -65,11 +71,11 @@ def get_criterion(args,dataset):
     else:
         weight=None
     if args.criterion =='ce':
-        return torch.nn.CrossEntropyLoss(label_smoothing=args.label_smoothing,)
+        return torch.nn.CrossEntropyLoss(label_smoothing=args.label_smoothing,weight=weight)
     elif args.criterion =='gce':
         return custom.BCE(label_smoothing=args.label_smoothing,use_gumbel=True,weight=weight,reduction=args.reduction)
     elif args.criterion =='iif':
-        return custom.IIFLoss(dataset,weight=weight,reduction=args.reduction,variant=args.iif)
+        return custom.IIFLoss(dataset,weight=weight,variant=args.iif,label_smoothing=args.label_smoothing)
     elif args.criterion =='bce':
         return custom.BCE(label_smoothing=args.label_smoothing,reduction=args.reduction)
     elif args.criterion =='softmax_gumbel_ce':

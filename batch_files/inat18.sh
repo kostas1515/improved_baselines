@@ -14,7 +14,7 @@
 #SBATCH -A bdliv03
 #SBATCH --mem-per-cpu=32000M
 # Setting maximum time days-hh:mm:ss]
-#SBATCH -t 48:00:00
+#SBATCH -t 24:00:00
 # Setting number of CPU cores and number of nodes
 #SBATCH -n 16 -N 1
 
@@ -28,5 +28,9 @@ conda activate pytorch
 
 cd ../classification
 
-torchrun --nproc_per_node=4 train.py --model se_resnet50 --data-path ../../../datasets/  --batch-size 256 --lr 0.5 --lr-scheduler cosineannealinglr --lr-warmup-epochs 5 --lr-warmup-method linear --auto-augment ra  --epochs 500 --random-erase 0.1 --weight-decay 0.0001 --norm-weight-decay 0.0 --label-smoothing 0.1 --mixup-alpha 0.2 --cutmix-alpha 1.0 --train-crop-size 176 --val-resize-size 232 --ra-sampler --ra-reps 4 --dset_name=inat18 --output-dir ../experiments/inat_se_r50_softmax_e500_cosine_mixup_wd1e-4_aug_gumbel_se_guelu_add/ --classif_norm cosine --use_gumbel_se
+# torchrun --nproc_per_node=4 train.py --model se_resnet50 --data-path ../../../datasets/  --batch-size 256 --lr 0.5 --lr-scheduler cosineannealinglr --lr-warmup-epochs 5 --lr-warmup-method linear --auto-augment ra  --epochs 500 --random-erase 0.1 --weight-decay 0.0001 --norm-weight-decay 0.0 --label-smoothing 0.1 --mixup-alpha 0.2 --cutmix-alpha 1.0 --train-crop-size 176 --val-resize-size 232 --ra-sampler --ra-reps 4 --dset_name=inat18 --output-dir ../experiments/inat_se_r50_softmax_e500_cosine_mixup_wd1e-4_aug_gumbel_se_guelu_add/ --classif_norm cosine --use_gumbel_se
 
+
+torchrun --nproc_per_node=4 train.py --model se_resnet50 --data-path ../../../datasets/  --batch-size 256 --lr 0.5 --lr-scheduler cosineannealinglr --lr-warmup-epochs 1 --lr-warmup-method linear --auto-augment ra  --epochs 10 --random-erase 0.1 --weight-decay 0.0001 --norm-weight-decay 0.0 --label-smoothing 0.1 --mixup-alpha 0.2 --cutmix-alpha 1.0 --train-crop-size 176 --val-resize-size 232 --ra-reps 4 --dset_name=inat18 --output-dir ../experiments/test/ --classif_norm cosine --load ../experiments/inat_se_r50_softmax_e500_cosine_mixup_wd1e-4_aug/model_499.pth --decoup --sampler upsampling
+
+torchrun --nproc_per_node=4 train.py --model se_resnet50 --data-path ../../../datasets/  --batch-size 256 --lr 0.0005 --lr-scheduler cosineannealinglr --lr-warmup-epochs 1 --lr-warmup-method linear --auto-augment ra  --epochs 10 --random-erase 0.1 --weight-decay 0.0001 --norm-weight-decay 0.0 --label-smoothing 0.1 --mixup-alpha 0.2 --cutmix-alpha 1.0 --train-crop-size 176 --val-resize-size 232 --ra-sampler --ra-reps 4 --dset_name=inat18 --output-dir ../experiments/test/ --classif_norm cosine --load ../experiments/inat_se_r50_softmax_e500_cosine_mixup_wd1e-4_aug/model_499.pth --decoup --deffered --reduction sum

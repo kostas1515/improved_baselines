@@ -67,11 +67,9 @@ class SoftmaxGumbel(nn.Module):
 
 class IIFLoss(nn.Module):
     # BCEwithLogitLoss() with reduced missing label effects.
-    def __init__(self,dataset,variant='rel',iif_norm=0,reduction='mean',device='cuda',weight=None):
+    def __init__(self,dataset,variant='rel',device='cuda',weight=None,label_smoothing=None):
         super(IIFLoss, self).__init__()
-        self.loss_fcn = nn.CrossEntropyLoss(reduction='none',weight=weight)
-        self.reduction=reduction
-    
+        self.loss_fcn = torch.nn.CrossEntropyLoss(label_smoothing=label_smoothing,weight=weight)
         self.variant = variant
         freqs = np.array(dataset.get_cls_num_list())
         iif={}
@@ -84,19 +82,12 @@ class IIFLoss(nn.Module):
         iif['base2'] = np.log2(freqs.sum()/freqs)
         iif['base10'] = np.log10(freqs.sum()/freqs)
         self.iif = {k: torch.tensor([v],dtype=torch.float).to(device,non_blocking=True) for k, v in iif.items()}
-        if iif_norm >0:
-            self.iif = {k: v/torch.norm(v,p=iif_norm)  for k, v in self.iif.items()}
 #         print(self.iif[self.variant])
         
     def forward(self, pred, targets=None,infer=False):
     
         if infer is False:
-            loss = self.loss_fcn(pred-self.iif[self.variant],targets)
-
-            if self.reduction=='mean':
-                loss=loss.mean()
-            elif self.reduction=='sum':
-                loss=loss.sum()
+            loss = self.loss_fcn(pred,targets)
             return loss
         else:
             out = (pred+self.iif[self.variant])

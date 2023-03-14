@@ -408,7 +408,7 @@ def main(args):
     if args.decoup:
         model = select_training_param(model)
 
-    if args.dset_name == 'places_lt':
+    if args.fn_places is True:
         model = finetune_places(model)
 
     args.lr_scheduler = args.lr_scheduler.lower()
@@ -482,7 +482,7 @@ def main(args):
             
     if args.load_from:
         checkpoint = torch.load(args.load_from, map_location="cpu")
-        model_without_ddp.load_state_dict(checkpoint["model"])
+        model_without_ddp.load_state_dict(checkpoint["model"],strict=False)
 
     if args.test_only:
         # We disable the cudnn benchmarking because it can noticeably affect the accuracy
@@ -619,6 +619,12 @@ def get_args_parser(add_help=True):
         "--sync-bn",
         dest="sync_bn",
         help="Use sync batch norm",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--fn_places",
+        help="Finetune last resnet block in places",
+        default=False,
         action="store_true",
     )
     parser.add_argument(

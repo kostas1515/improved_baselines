@@ -111,10 +111,10 @@ class SimpleViT(nn.Module):
             self.linear_head = nn.Sequential(
             nn.LayerNorm(dim),
             resnet_cifar.CosNorm_Classifier(dim, num_classes))
-        elif use_norm == 'cosine':
+        elif use_norm=='lr_cosine':
             self.linear_head = nn.Sequential(
             nn.LayerNorm(dim),
-            resnet_cifar.NormedLinear(dim, num_classes))
+            resnet_cifar.CosNorm_Classifier(dim, num_classes,learnable=True))
         else:
             self.linear_head = nn.Sequential(
                 nn.LayerNorm(dim),

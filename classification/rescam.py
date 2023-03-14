@@ -76,7 +76,13 @@ class ResNetCam(nn.Module):
         pred = self.forward(img)
         category =  pred.argmax().item()
         if self.class_map is not None:
-            return self.names[self.class_map.index(category)]
+            if category >= 864:
+                indicator ='R'
+            elif (category >= 385) & (category < 864):
+                indicator ='C'
+            else:
+                indicator = 'F'
+            return indicator+': '+ self.names[self.class_map.index(category)]
         else:
             return self.names[category]
         
