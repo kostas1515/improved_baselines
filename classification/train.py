@@ -546,6 +546,7 @@ def get_args_parser(add_help=True):
     parser.add_argument("--model", default="resnet32", type=str, help="model name")
     parser.add_argument('--use_gumbel_se', default=False, help='Gumbel activation in excitation phase of SE',action='store_true')
     parser.add_argument('--use_gumbel_cb', default=False, help='Gumbel activation in spatial attention phase of CB',action='store_true')
+    parser.add_argument('--attn', default='softmax',type=str, help='softmax|gumbel')
     parser.add_argument('--classif_norm', default=None,type=str, help='Type of classifier Normalisation {None,norm,cosine')
     parser.add_argument('--criterion', default='ce',type=str, help='Criterion used for classifier {ce,bce,gce')
     
@@ -606,8 +607,8 @@ def get_args_parser(add_help=True):
     parser.add_argument("--lr-min", default=0.0, type=float, help="minimum lr of lr schedule (default: 0.0)")
     parser.add_argument("--print-freq", default=100, type=int, help="print frequency")
     parser.add_argument("--output-dir", default=".", type=str, help="path to save outputs")
-    parser.add_argument("--resume", default="", type=str, help="path of checkpoint")
-    parser.add_argument("--load_from", default="", type=str, help="path of checkpoint")
+    parser.add_argument("--resume", default="", type=str, help="path of checkpoint, loads model's and optimiser's params and resumes training")
+    parser.add_argument("--load_from", default="", type=str, help="path of checkpoint, loads only model weights")
     parser.add_argument("--start-epoch", default=0, type=int, metavar="N", help="start epoch")
     parser.add_argument(
         "--cache-dataset",

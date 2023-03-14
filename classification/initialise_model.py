@@ -29,11 +29,19 @@ def _mismatched_classifier(model,pretrained):
 
 def get_model(args,num_classes):
     if args.model.endswith('vit') is True:
-        if args.use_gumbel_se is True:
-            attention = 'gumbel'
-        else: 
-            attention = 'softmax'
-        if args.model == 'simple_vit':
+        attention = args.attn
+        if args.model == 't_simple_vit':
+            model = SimpleViT(
+                    image_size = args.train_crop_size,
+                    patch_size = 16,
+                    num_classes = num_classes,
+                    dim = 192,
+                    depth = 12,
+                    heads = 3,
+                    mlp_dim = 768,
+                    attention=attention,
+                    use_norm=args.classif_norm)
+        elif args.model == 's_simple_vit':
             model = SimpleViT(
                     image_size = args.train_crop_size,
                     patch_size = 16,
@@ -42,6 +50,28 @@ def get_model(args,num_classes):
                     depth = 12,
                     heads = 6,
                     mlp_dim = 1536,
+                    attention=attention,
+                    use_norm=args.classif_norm)
+        elif args.model == 'b_simple_vit':
+            model = SimpleViT(
+                    image_size = args.train_crop_size,
+                    patch_size = 16,
+                    num_classes = num_classes,
+                    dim = 768,
+                    depth = 12,
+                    heads = 12,
+                    mlp_dim = 3072,
+                    attention=attention,
+                    use_norm=args.classif_norm)
+        elif args.model == 'l_simple_vit':
+            model = SimpleViT(
+                    image_size = args.train_crop_size,
+                    patch_size = 16,
+                    num_classes = num_classes,
+                    dim = 1024,
+                    depth = 24,
+                    heads = 12,
+                    mlp_dim = 4096,
                     attention=attention,
                     use_norm=args.classif_norm)
         if args.pretrained is not None:
