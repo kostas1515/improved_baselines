@@ -146,24 +146,43 @@ def select_training_param(model):
 #     print(model)
     for v in model.parameters():
         v.requires_grad = False
+    
     try:
-        torch.nn.init.xavier_uniform_(model.linear.weight)
-        model.linear.weight.requires_grad = True
-        try:
-            model.linear.bias.data.fill_(0.01)
-            model.linear.bias.requires_grad = True
-        except AttributeError:
-            pass
+        if isinstance(model.linear, nn.Linear) is True:
+            torch.nn.init.xavier_uniform_(model.linear.weight)
+            model.linear.weight.requires_grad = True
+            try:
+                model.linear.bias.data.fill_(0.01)
+                model.linear.bias.requires_grad = True
+            except AttributeError:
+                pass
+        else:
+            for k in range(3):
+                torch.nn.init.xavier_uniform_(model.linear[k].weight)
+                model.linear[k].weight.requires_grad = True
+                try:
+                    model.linear[k].bias.data.fill_(0.01)
+                    model.linear[k].bias.requires_grad = True
+                except AttributeError:
+                    pass
     except AttributeError:
-        torch.nn.init.xavier_uniform_(model.fc.weight)
-        try:
-            model.fc.bias.requires_grad = True
-            model.fc.bias.data.fill_(0.01)
-        except AttributeError:
-            pass
-        model.fc.weight.requires_grad = True
-        
-
+        if isinstance(model.fc, nn.Linear) is True:
+            torch.nn.init.xavier_uniform_(model.fc.weight)
+            try:
+                model.fc.bias.requires_grad = True
+                model.fc.bias.data.fill_(0.01)
+            except AttributeError:
+                pass
+            model.fc.weight.requires_grad = True
+        else:
+            for k in range(3):
+                torch.nn.init.xavier_uniform_(model.fc[k].weight)
+                try:
+                    model.fc[k].bias.requires_grad = True
+                    model.fc[k].bias.data.fill_(0.01)
+                except AttributeError:
+                    pass
+                model.fc[k].weight.requires_grad = True
     return model
 
 
@@ -365,7 +384,7 @@ def main(args):
     if args.distributed and args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
-    criterion = initialise_model.get_criterion(args,dataset)
+    criterion = initialise_model.get_criterion(args,dataset,model)
 
     custom_keys_weight_decay = []
     if args.bias_weight_decay is not None:

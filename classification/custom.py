@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from scipy.special import ndtri
-
+import itertools
 
 class BCE(nn.Module):
     def __init__(self,reduction='mean',label_smoothing=0.0,use_gumbel=False,weight=None):
@@ -39,6 +39,42 @@ class BCE(nn.Module):
             loss=loss.sum()/y_onehot_smoothed.sum()
              
         return loss
+    
+class CRA(nn.Module):
+    def __init__(self,model,reduction='mean',label_smoothing=0.0,weight=None):
+        super(CRA, self).__init__()
+        self.reduction = reduction
+        self.label_smoothing = label_smoothing
+        self.loss_fcn = nn.BCELoss(reduction='none',weight=weight)
+        self.model = model
+        try:
+            self.fc_cls_weights = [self.model.linear.weight.data,self.model.linear2.weight.data]
+        except AttributeError:
+            self.fc_cls_weights = [self.model.fc.weight.data,self.model.fc2.weight.data]
+        self.cos_similarity  = torch.nn.CosineSimilarity(dim=1, eps=1e-08)
+
+        
+    def forward(self, pred, targets):
+        nc=pred.shape[-1]
+        if (targets.size() == pred.size()) is False:
+            y_onehot = torch.cuda.FloatTensor(pred.shape)
+            y_onehot.zero_()
+            y_onehot.scatter_(1, targets.unsqueeze(1), 1)
+            y_onehot_smoothed = y_onehot*(1-self.label_smoothing) + self.label_smoothing/nc
+        else:
+            y_onehot_smoothed = targets*(1-self.label_smoothing) + self.label_smoothing/nc
+
+        loss = self.loss_fcn(pred,y_onehot_smoothed)
+        if self.reduction=='mean':
+            loss=loss.mean()
+        elif self.reduction=='sum':
+            loss=loss.sum()/y_onehot_smoothed.sum()
+            
+        fc_cls_weight_sim = torch.cat([torch.abs(self.cos_similarity(pair[0],pair[1])) for pair in list(itertools.combinations(self.fc_cls_weights, 2))],dim=0)
+        fc_cls_weight_sim = torch.clamp(fc_cls_weight_sim,min=0.0001,max=0.9999)
+        weight_sim_loss_ = -torch.log(torch.ones_like(fc_cls_weight_sim) - fc_cls_weight_sim).sum()/nc
+        
+        return loss +100*weight_sim_loss_
     
 class SoftmaxGumbel(nn.Module):
     def __init__(self,reduction='mean',label_smoothing=0.0):

@@ -83,6 +83,38 @@ class CosNorm_Classifier(nn.Module):
         else:
             return torch.mm(self.scale * ex, ew.t())
 
+class InvCosNorm_Classifier(nn.Module):
+    def __init__(self, in_dims, out_dims, scale=1/16, margin=0.5, init_std=0.001,learnable=False):
+        super(InvCosNorm_Classifier, self).__init__()
+        self.in_features = in_dims
+        self.out_dims = out_dims
+        self.scale = scale
+        self.learnable = learnable
+        if self.learnable is True:
+            self.scale = Parameter(torch.FloatTensor(1).cuda())
+
+        self.margin = margin
+        self.weight = Parameter(torch.Tensor(out_dims, in_dims).cuda())
+        self.bias = Parameter(torch.Tensor(out_dims).cuda())
+        self.reset_parameters() 
+
+    def reset_parameters(self):
+        stdv = 1. / math.sqrt(self.weight.size(1))
+        self.weight.data.uniform_(-stdv, stdv)
+        if self.learnable is True:
+            self.scale.data.fill_(5)
+
+    def forward(self, input, *args):
+        norm_x = torch.norm(input.clone(), 2, 1, keepdim=True)
+        
+        ex = input* (1 + norm_x)
+        ew = self.weight * torch.norm(self.weight, 2, 1, keepdim=True)
+        
+        if self.learnable is True:
+            return torch.mm((self.scale**2) * ex, ew.t()) 
+        else:
+            return torch.mm(self.scale * ex, ew.t()) + self.bias
+        
 class LambdaLayer(nn.Module):
 
     def __init__(self, lambd):
@@ -330,6 +362,10 @@ class ResNet_s(nn.Module):
             self.linear = NormedLinear(64, num_classes)
         elif use_norm=='cosine':
             self.linear = CosNorm_Classifier(64, num_classes)
+        elif use_norm=='dual_head':
+            self.linear = nn.Linear(64, num_classes)
+            self.linear2 = nn.Linear(64, num_classes)
+            self.linear3 = nn.Linear(64, 1)
         else:
             self.linear = nn.Linear(64, num_classes)
         self.apply(_weights_init)
@@ -350,8 +386,21 @@ class ResNet_s(nn.Module):
         out = self.layer3(out)
         out = F.avg_pool2d(out, out.size()[3])
         out = out.view(out.size(0), -1)
-        out = self.linear(out)
-        return out
+        try:
+            out1 = self.linear(out.clone())
+            out2 = self.linear2(out.clone())
+            out3 = self.linear3(out.clone())
+
+            gombit = torch.exp(-torch.exp(-torch.clamp(out1,min=-4.0,max=10.0)))
+            normit=1/2+torch.erf(out2/(2**(1/2)))/2
+            switch = out3.sigmoid()
+            final = gombit * (1-switch) +  switch* normit
+            return final
+        except:
+            out = self.linear(out)
+            return out
+            
+        
 
 class ContrastiveLayer(nn.Module):
 

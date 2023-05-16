@@ -214,10 +214,16 @@ class ResNet(nn.Module):
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         if use_norm=='cosine':
             self.fc = resnet_cifar.CosNorm_Classifier(512 * block.expansion, num_classes)
+        elif use_norm=='inv':
+            self.fc = resnet_cifar.InvCosNorm_Classifier(512 * block.expansion, num_classes)
         elif use_norm=='lr_cosine':
             self.fc = resnet_cifar.CosNorm_Classifier(512 * block.expansion, num_classes,learnable=True)
         elif use_norm=='norm':
             self.fc = resnet_cifar.NormedLinear(512 * block.expansion, num_classes)
+        elif use_norm=='dual_head':
+            self.fc = nn.Linear(512 * block.expansion, num_classes)
+            self.fc2 = nn.Linear(512 * block.expansion, num_classes)
+            self.fc3 = nn.Linear(512 * block.expansion, 1)
         else:
             self.fc = nn.Linear(512 * block.expansion, num_classes)
 
@@ -293,9 +299,20 @@ class ResNet(nn.Module):
 
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
-        x = self.fc(x)
+        try:
+            x1 = self.fc(x.clone())
+            x2 = self.fc2(x.clone())
+            x3 = self.fc3(x.clone())
 
-        return x
+            gombit = torch.exp(-torch.exp(-torch.clamp(x1,min=-4.0,max=10.0)))
+            normit=1/2+torch.erf(x2/(2**(1/2)))/2
+            switch = x3.sigmoid()
+            final = gombit * (1-switch) +  switch* normit
+
+            return final
+        except AttributeError:
+            x = self.fc(x)
+            return x
 
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
