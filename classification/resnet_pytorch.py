@@ -189,7 +189,7 @@ class ResNet(nn.Module):
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
-
+        self.dual_head=False
         self.inplanes = 64
         self.dilation = 1
         if replace_stride_with_dilation is None:
@@ -224,6 +224,7 @@ class ResNet(nn.Module):
             self.fc = nn.Linear(512 * block.expansion, num_classes)
             self.fc2 = nn.Linear(512 * block.expansion, num_classes)
             self.fc3 = nn.Linear(512 * block.expansion, 1)
+            self.dual_head=True
         else:
             self.fc = nn.Linear(512 * block.expansion, num_classes)
 
@@ -299,7 +300,7 @@ class ResNet(nn.Module):
 
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
-        try:
+        if self.dual_head is True:
             x1 = self.fc(x.clone())
             x2 = self.fc2(x.clone())
             x3 = self.fc3(x.clone())
@@ -310,7 +311,7 @@ class ResNet(nn.Module):
             final = gombit * (1-switch) +  switch* normit
 
             return final
-        except AttributeError:
+        else:
             x = self.fc(x)
             return x
 

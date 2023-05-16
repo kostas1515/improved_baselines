@@ -148,25 +148,30 @@ def select_training_param(model):
         v.requires_grad = False
     
     try:
-        if isinstance(model.linear, nn.Linear) is True:
+        if model.dual_head is False:
             torch.nn.init.xavier_uniform_(model.linear.weight)
-            model.linear.weight.requires_grad = True
             try:
-                model.linear.bias.data.fill_(0.01)
                 model.linear.bias.requires_grad = True
+                model.linear.bias.data.fill_(0.01)
             except AttributeError:
                 pass
+            model.linear.weight.requires_grad = True
         else:
-            for k in range(3):
-                torch.nn.init.xavier_uniform_(model.linear[k].weight)
-                model.linear[k].weight.requires_grad = True
-                try:
-                    model.linear[k].bias.data.fill_(0.01)
-                    model.linear[k].bias.requires_grad = True
-                except AttributeError:
-                    pass
+            torch.nn.init.normal_(model.linear.weight.data,0.0,0.001)
+            model.linear.weight.requires_grad = True
+            torch.nn.init.normal_(model.linear2.weight.data,0.0,0.001)
+            model.linear2.weight.requires_grad = True
+            torch.nn.init.normal_(model.linear3.weight.data,0.0,0.001)
+            model.linear3.weight.requires_grad = True
+            
+            model.linear.bias.requires_grad = True
+            model.linear.bias.data.fill_(-2)
+            model.linear2.bias.requires_grad = True
+            model.linear2.bias.data.fill_(4.0)
+            model.linear3.bias.requires_grad = True
+            model.linear3.bias.data.fill_(-3)
     except AttributeError:
-        if isinstance(model.fc, nn.Linear) is True:
+        if model.dual_head is False:
             torch.nn.init.xavier_uniform_(model.fc.weight)
             try:
                 model.fc.bias.requires_grad = True
@@ -175,14 +180,20 @@ def select_training_param(model):
                 pass
             model.fc.weight.requires_grad = True
         else:
-            for k in range(3):
-                torch.nn.init.xavier_uniform_(model.fc[k].weight)
-                try:
-                    model.fc[k].bias.requires_grad = True
-                    model.fc[k].bias.data.fill_(0.01)
-                except AttributeError:
-                    pass
-                model.fc[k].weight.requires_grad = True
+
+            torch.nn.init.normal_(model.fc.weight.data,0.0,0.001)
+            model.fc.weight.requires_grad = True
+            torch.nn.init.normal_(model.fc2.weight.data,0.0,0.001)
+            model.fc2.weight.requires_grad = True
+            torch.nn.init.normal_(model.fc3.weight.data,0.0,0.001)
+            model.fc3.weight.requires_grad = True
+            
+            model.fc.bias.requires_grad = True
+            model.fc.bias.data.fill_(-2)
+            model.fc2.bias.requires_grad = True
+            model.fc2.bias.data.fill_(4.0)
+            model.fc3.bias.requires_grad = True
+            model.fc3.bias.data.fill_(-3)
     return model
 
 
