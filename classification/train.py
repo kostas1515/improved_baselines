@@ -65,8 +65,12 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
         start_time = time.time()
         image, target = image.to(device), target.to(device)
         with torch.cuda.amp.autocast(enabled=scaler is not None):
-            output = model(image)
-            loss = criterion(output, target)
+            if args.criterion == 'simmim':
+                loss = criterion(image)
+            else:
+                output = model(image)
+                loss = criterion(output, target)
+            
 
         optimizer.zero_grad()
         if scaler is not None:
@@ -91,12 +95,14 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
                 # Reset ema buffer to keep copying weights during warmup period
                 model_ema.n_averaged.fill_(0)
 
-        acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
-        batch_size = image.shape[0]
         metric_logger.update(loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
-        metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
-        metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
+        batch_size = image.shape[0]
+        if args.criterion != 'simmim':
+            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+            metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
+            metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
         metric_logger.meters["img/s"].update(batch_size / (time.time() - start_time))
+        
 
 
 def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix=""):
@@ -109,17 +115,21 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
         for image, target in metric_logger.log_every(data_loader, print_freq, header):
             image = image.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
-            output = model(image)
-            loss = criterion(output, target)
+            if args.criterion == 'simmim':
+                loss = criterion(image)
+            else:
+                output = model(image)
+                loss = criterion(output, target)
             if hasattr(criterion, "iif"):
                 output = criterion(output, infer=True)
-            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             # FIXME need to take into account that the datasets
             # could have been padded in distributed setup
             batch_size = image.shape[0]
             metric_logger.update(loss=loss.item())
-            metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
-            metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
+            if args.criterion != 'simmim':
+                acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+                metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
+                metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
             num_processed_samples += batch_size
     # gather the stats from all processes
 
@@ -138,9 +148,14 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
         )
 
     metric_logger.synchronize_between_processes()
-
-    print(f"{header} Acc@1 {metric_logger.acc1.global_avg:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f}")
-    return metric_logger.acc1.global_avg
+    
+    if args.criterion != 'simmim':
+        print(f"{header} Acc@1 {metric_logger.acc1.global_avg:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f}")
+        return metric_logger.acc1.global_avg
+    else:
+        print(f"{header} Val Loss: {metric_logger.loss.global_avg:.3f}")
+        return metric_logger.loss.global_avg
+        
 
 def select_training_param(model):
 #     print(model)
@@ -401,7 +416,7 @@ def main(args):
     if args.bias_weight_decay is not None:
         custom_keys_weight_decay.append(("bias", args.bias_weight_decay))
     if args.transformer_embedding_decay is not None:
-        for key in ["class_token", "position_embedding", "relative_position_bias_table"]:
+        for key in ["cls_token", "pos_embedding", "relative_position_bias_table"]:
             custom_keys_weight_decay.append((key, args.transformer_embedding_decay))
     parameters = utils.set_weight_decay(
         model,
@@ -409,7 +424,6 @@ def main(args):
         norm_weight_decay=args.norm_weight_decay,
         custom_keys_weight_decay=custom_keys_weight_decay if len(custom_keys_weight_decay) > 0 else None,
     )
-
     opt_name = args.opt.lower()
     if opt_name.startswith("sgd"):
         optimizer = torch.optim.SGD(
@@ -429,7 +443,14 @@ def main(args):
         optimizer = apex.optimizers.FusedLAMB(parameters, lr=args.lr, weight_decay=args.weight_decay)
     else:
         raise RuntimeError(f"Invalid optimizer {args.opt}. Only SGD, RMSprop and AdamW are supported.")
-
+        
+    if args.criterion == 'simmim':
+        optimizer.add_param_group({'params': criterion.mask_token})
+        optimizer.add_param_group({'params': criterion.to_pixels.parameters()})
+        if criterion.sim_loss is True:
+            optimizer.add_param_group({'params': criterion.self_sim_loss.parameters()}) 
+        
+        
     scaler = torch.cuda.amp.GradScaler() if args.amp else None
     if args.apex:
         model, optimizer = amp.initialize(model, optimizer,
@@ -499,6 +520,9 @@ def main(args):
     if args.resume:
         checkpoint = torch.load(args.resume, map_location="cpu")
         model_without_ddp.load_state_dict(checkpoint["model"])
+        if args.criterion == 'simmim':
+            criterion.load_state_dict(checkpoint["mim"])
+                
         if not args.test_only:
             optimizer.load_state_dict(checkpoint["optimizer"])
             lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
@@ -551,6 +575,8 @@ def main(args):
                 checkpoint["scaler"] = scaler.state_dict()
             elif args.apex:
                 checkpoint["amp"] = amp.state_dict()
+            if args.criterion == 'simmim':
+                checkpoint["mim"] = criterion.state_dict()
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"model_{epoch}.pth"))
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
 

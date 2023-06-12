@@ -3,6 +3,10 @@ from torch import nn
 
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
+try :
+    import resnet_cifar
+except ImportError:
+    from classification import resnet_cifar
 
 # helpers
 
@@ -33,14 +37,14 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.):
+    def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.,attention='softmax'):
         super().__init__()
         inner_dim = dim_head *  heads
         project_out = not (heads == 1 and dim_head == dim)
 
         self.heads = heads
         self.scale = dim_head ** -0.5
-
+        self.attention = attention
         self.attend = nn.Softmax(dim = -1)
         self.dropout = nn.Dropout(dropout)
 
@@ -57,7 +61,11 @@ class Attention(nn.Module):
 
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
 
-        attn = self.attend(dots)
+        if self.attention =='gumbel':
+            gumbel_gain = torch.exp(-torch.exp(-torch.clamp(dots,min=-4.0,max=10.0)))
+            attn = self.attend(dots) *gumbel_gain
+        elif self.attention =='softmax':
+            attn = self.attend(dots)
         attn = self.dropout(attn)
 
         out = torch.matmul(attn, v)
@@ -65,12 +73,12 @@ class Attention(nn.Module):
         return self.to_out(out)
 
 class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout = 0.):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout = 0.,attention='softmax'):
         super().__init__()
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout)),
+                PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout,attention=attention)),
                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout))
             ]))
     def forward(self, x):
@@ -80,7 +88,7 @@ class Transformer(nn.Module):
         return x
 
 class ViT(nn.Module):
-    def __init__(self, *, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0.):
+    def __init__(self, *, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0.,attention='softmax',use_norm=None):
         super().__init__()
         image_height, image_width = pair(image_size)
         patch_height, patch_width = pair(patch_size)
@@ -100,15 +108,24 @@ class ViT(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
 
-        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout,attention=attention)
 
         self.pool = pool
         self.to_latent = nn.Identity()
-
-        self.mlp_head = nn.Sequential(
+        
+        if use_norm == 'cosine':
+            self.mlp_head = nn.Sequential(
             nn.LayerNorm(dim),
-            nn.Linear(dim, num_classes)
-        )
+            resnet_cifar.CosNorm_Classifier(dim, num_classes))
+        elif use_norm=='lr_cosine':
+            self.mlp_head = nn.Sequential(
+            nn.LayerNorm(dim),
+            resnet_cifar.CosNorm_Classifier(dim, num_classes,learnable=True))
+        else:
+            self.mlp_head = nn.Sequential(
+                nn.LayerNorm(dim),
+                nn.Linear(dim, num_classes)
+            )
 
     def forward(self, img):
         x = self.to_patch_embedding(img)

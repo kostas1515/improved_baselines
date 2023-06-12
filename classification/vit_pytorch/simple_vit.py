@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from vit_pytorch.gumbel import Gumbel,NormGumbel,SoftGumbel,SoftEntropyGumbel
 
 from einops import rearrange
 from einops.layers.torch import Rearrange
@@ -65,6 +64,8 @@ class Attention(nn.Module):
         if self.attention =='gumbel':
             gumbel_gain = torch.exp(-torch.exp(-torch.clamp(dots,min=-4.0,max=10.0)))
             attn = self.attend(dots) *gumbel_gain
+        elif self.attention =='sigmoid':
+            attn = self.attend(dots) * dots.sigmoid()
         elif self.attention =='softmax':
             attn = self.attend(dots)
 

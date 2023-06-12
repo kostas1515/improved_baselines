@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 try:
     from vit_pytorch import SimpleViT
+    from vit_pytorch import ViT
+    from vit_pytorch.simmim import SimMIM
     from vit_pytorch.cait import CaiT
     import resnet_pytorch
     import resnet_cifar
@@ -74,6 +76,50 @@ def get_model(args,num_classes):
                     mlp_dim = 4096,
                     attention=attention,
                     use_norm=args.classif_norm)
+        elif args.model == 't_vit':
+            model = ViT(
+                    image_size = args.train_crop_size,
+                    patch_size = 16,
+                    num_classes = num_classes,
+                    dim = 192,
+                    depth = 12,
+                    heads = 3,
+                    mlp_dim = 768,
+                    attention=attention,
+                    use_norm=args.classif_norm)
+        elif args.model == 's_vit':
+            model = ViT(
+                    image_size = args.train_crop_size,
+                    patch_size = 16,
+                    num_classes = num_classes,
+                    dim = 384,
+                    depth = 12,
+                    heads = 6,
+                    mlp_dim = 1536,
+                    attention=attention,
+                    use_norm=args.classif_norm)
+        elif args.model == 'b_vit':
+            model = ViT(
+                    image_size = args.train_crop_size,
+                    patch_size = 16,
+                    num_classes = num_classes,
+                    dim = 768,
+                    depth = 12,
+                    heads = 12,
+                    mlp_dim = 3072,
+                    attention=attention,
+                    use_norm=args.classif_norm)
+        elif args.model == 'l_vit':
+            model = ViT(
+                    image_size = args.train_crop_size,
+                    patch_size = 16,
+                    num_classes = num_classes,
+                    dim = 1024,
+                    depth = 24,
+                    heads = 12,
+                    mlp_dim = 4096,
+                    attention=attention,
+                    use_norm=args.classif_norm)
         if args.pretrained is not None:
             if num_classes!=1000:
                 model = _mismatched_classifier(model,args.pretrained)
@@ -112,6 +158,8 @@ def get_criterion(args,dataset,model=None):
         return torch.nn.CrossEntropyLoss(label_smoothing=args.label_smoothing,weight=weight)
     elif args.criterion =='gce':
         return custom.BCE(label_smoothing=args.label_smoothing,use_gumbel=True,weight=weight,reduction=args.reduction)
+    elif args.criterion =='nce':
+        return custom.BCE(label_smoothing=args.label_smoothing,use_normal=True,weight=weight,reduction=args.reduction)
     elif args.criterion =='iif':
         return custom.IIFLoss(dataset,weight=weight,variant=args.iif,label_smoothing=args.label_smoothing)
     elif args.criterion =='bce':
@@ -120,12 +168,18 @@ def get_criterion(args,dataset,model=None):
         return custom.CRA(model,label_smoothing=args.label_smoothing,reduction=args.reduction)
     elif args.criterion =='softmax_gumbel_ce':
         return custom.SoftmaxGumbel(label_smoothing=args.label_smoothing)
+    elif args.criterion == 'simmim':
+        mim = SimMIM(
+            encoder = model,
+            masking_ratio = 0.5  # they found 50% to yield the best results
+        )
+        return mim
         
 
 
 def initialise_classifier(args,model,num_classes):
     num_classes = torch.tensor([num_classes])
-    if args.criterion == 'gce':
+    if (args.criterion == 'gce')|(args.criterion == 'nce'):
         if args.model.endswith('vit') is True:
             torch.nn.init.normal_(model.linear_head[-1].weight.data,0.0,0.001)
             try:
