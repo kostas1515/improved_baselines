@@ -47,8 +47,8 @@ class SelfSimilarityLoss(nn.Module):
     def forward(self, pred, target):
         target_emb = self.sim_emb(target)
 #         pred_emb = self.sim_emb(target)
-        self_sim_matrix = torch.matmul(target_emb,target_emb.transpose(2,1))/torch.norm(target_emb,dim=2,keepdim=True)**2
-        dissimilar = torch.matmul(pred,target.transpose(2,1))/(torch.norm(target,dim=2,keepdim=True)*torch.norm(pred,dim=2,keepdim=True))
+        self_sim_matrix = torch.matmul(target_emb,target_emb.transpose(2,1))/(torch.matmul(torch.norm(target_emb,dim=2,keepdim=True),torch.norm(target_emb,dim=2,keepdim=True).transpose(2,1)))
+        dissimilar = torch.matmul(pred,target.transpose(2,1))/(torch.matmul(torch.norm(pred,dim=2,keepdim=True),torch.norm(target,dim=2,keepdim=True).transpose(2,1)))
         pred = (dissimilar/self.temp)
         
         if self.use_gumbel is True:
