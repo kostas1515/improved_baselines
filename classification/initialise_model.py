@@ -98,6 +98,17 @@ def get_model(args,num_classes):
                     mlp_dim = 1536,
                     attention=attention,
                     use_norm=args.classif_norm)
+        elif args.model == 'ds_vit':
+            model = ViT(
+                    image_size = args.train_crop_size,
+                    patch_size = 16,
+                    num_classes = num_classes,
+                    dim = 384,
+                    depth = 24,
+                    heads = 6,
+                    mlp_dim = 1536,
+                    attention=attention,
+                    use_norm=args.classif_norm)
         elif args.model == 'b_vit':
             model = ViT(
                     image_size = args.train_crop_size,
@@ -105,6 +116,17 @@ def get_model(args,num_classes):
                     num_classes = num_classes,
                     dim = 768,
                     depth = 12,
+                    heads = 12,
+                    mlp_dim = 3072,
+                    attention=attention,
+                    use_norm=args.classif_norm)
+        elif args.model == 'db_vit':
+            model = ViT(
+                    image_size = args.train_crop_size,
+                    patch_size = 16,
+                    num_classes = num_classes,
+                    dim = 768,
+                    depth = 24,
                     heads = 12,
                     mlp_dim = 3072,
                     attention=attention,
@@ -172,7 +194,7 @@ def get_criterion(args,dataset,model=None):
         mim = SimMIM(
             encoder = model,
             masking_ratio = 0.5,  # they found 50% to yield the best results
-            sim_loss = False
+            sim_loss = True
         )
         return mim
         

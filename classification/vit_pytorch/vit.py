@@ -66,6 +66,9 @@ class Attention(nn.Module):
             attn = self.attend(dots) *gumbel_gain
         elif self.attention =='softmax':
             attn = self.attend(dots)
+        elif self.attention =='sigmoid':
+            gain = dots.sigmoid()
+            attn = self.attend(dots)*gain
         attn = self.dropout(attn)
 
         out = torch.matmul(attn, v)
