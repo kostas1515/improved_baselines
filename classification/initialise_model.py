@@ -171,7 +171,8 @@ def get_criterion(args,dataset,model=None):
     elif args.criterion == 'simmim':
         mim = SimMIM(
             encoder = model,
-            masking_ratio = 0.5  # they found 50% to yield the best results
+            masking_ratio = 0.5,  # they found 50% to yield the best results
+            sim_loss = False
         )
         return mim
         

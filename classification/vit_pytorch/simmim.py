@@ -29,44 +29,14 @@ def posemb_sincos_2d(patches, temperature = 10000, dtype = torch.float32):
 #         return loss
 
 class SelfSimilarityLoss(nn.Module):
-    def __init__(self,dim_in,dim_out,temp=0.1,reduction='mean',use_gumbel=False,use_normal=False,weight=None,device=None):
-        super(SelfSimilarityLoss, self).__init__()
-        self.reduction = reduction
-        self.use_gumbel=use_gumbel
-        self.use_normal=use_normal
-        self.temp = temp
-
-        if (self.use_gumbel is True)|(self.use_normal is True):
-            self.loss_fcn = nn.BCELoss(reduction='none',weight=weight)
-        else:
-            self.loss_fcn = nn.BCEWithLogitsLoss(reduction='none',weight=weight)
-            
-        self.sim_emb = nn.Linear(dim_in, dim_out,device=device)
-
-        
+    def __init__(self):
+        super(SelfSimilarityLoss, self).__init__() 
+        self.loss_fcn = nn.MSELoss()
+       
     def forward(self, pred, target):
-        target_emb = self.sim_emb(target)
-#         pred_emb = self.sim_emb(target)
-        self_sim_matrix = torch.matmul(target_emb,target_emb.transpose(2,1))/(torch.matmul(torch.norm(target_emb,dim=2,keepdim=True),torch.norm(target_emb,dim=2,keepdim=True).transpose(2,1)))
+        self_sim_matrix = torch.matmul(target,target.transpose(2,1))/(torch.matmul(torch.norm(target,dim=2,keepdim=True),torch.norm(target,dim=2,keepdim=True).transpose(2,1)))
         dissimilar = torch.matmul(pred,target.transpose(2,1))/(torch.matmul(torch.norm(pred,dim=2,keepdim=True),torch.norm(target,dim=2,keepdim=True).transpose(2,1)))
-        pred = (dissimilar/self.temp)
-        
-        if self.use_gumbel is True:
-            pestim = torch.exp(-torch.exp(-torch.clamp(pred,min=-4.0,max=10.0)))
-            labels= torch.exp(-torch.exp(-torch.clamp((self_sim_matrix/self.temp),min=-4.0,max=10.0)))
-            loss = self.loss_fcn(pestim,labels)
-        elif self.use_normal is True:
-            pestim=1/2+torch.erf(-torch.clamp(pred,min=-8.0,max=8.0)/(2**(1/2)))/2
-            labels= 1/2+torch.erf(-torch.clamp((self_sim_matrix/self.temp),min=-8.0,max=8.0)/(2**(1/2)))/2
-            loss = self.loss_fcn(pestim,labels)
-        else:
-            labels= (self_sim_matrix/self.temp).sigmoid()
-            loss = self.loss_fcn(pred,labels)
-            
-        if self.reduction=='mean':
-            loss=loss.mean()
-        elif self.reduction=='sum':
-            loss=loss.sum()/labels.sum()
+        loss = self.loss_fcn(dissimilar,self_sim_matrix)
              
         return loss
 
@@ -76,7 +46,7 @@ class SimMIM(nn.Module):
         *,
         encoder,
         masking_ratio = 0.5,
-        sim_loss=True
+        sim_loss=False
     ):
         super().__init__()
         assert masking_ratio > 0 and masking_ratio < 1, 'masking ratio must be kept between 0 and 1'
@@ -105,7 +75,7 @@ class SimMIM(nn.Module):
         self.to_pixels = nn.Linear(encoder_dim, pixel_values_per_patch,device=device)
         self.sim_loss = sim_loss
         if self.sim_loss is True:
-            self.self_sim_loss = SelfSimilarityLoss(dim_in=encoder_dim,dim_out=pixel_values_per_patch,device=device)
+            self.self_sim_loss = SelfSimilarityLoss()
             
 
     def forward(self, img):
@@ -119,15 +89,6 @@ class SimMIM(nn.Module):
         # for indexing purposes
 
         batch_range = torch.arange(batch, device = device)[:, None]
-
-        # get positions
-        
-#         pos_emb = self.encoder.pos_embedding[:, 1:(num_patches + 1)]
-
-#         # patch to encoder tokens and add positions
-
-#         tokens = self.patch_to_emb(patches)
-#         tokens = tokens + pos_emb
         
         try:
             pos_emb = self.encoder.pos_embedding[:, 1:(num_patches + 1)]
@@ -171,7 +132,7 @@ class SimMIM(nn.Module):
         masked_patches = patches[batch_range, masked_indices]
         # calculate reconstruction loss
         if self.sim_loss is True:
-            recon_loss = (self.self_sim_loss(pred_pixel_values, masked_patches)+ F.l1_loss(pred_pixel_values, masked_patches))/ num_masked
+            recon_loss = (self.self_sim_loss(pred_pixel_values, masked_patches) + F.l1_loss(pred_pixel_values, masked_patches))/ num_masked
         else:
             recon_loss = F.l1_loss(pred_pixel_values, masked_patches) / num_masked
 

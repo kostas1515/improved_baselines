@@ -447,8 +447,6 @@ def main(args):
     if args.criterion == 'simmim':
         optimizer.add_param_group({'params': criterion.mask_token})
         optimizer.add_param_group({'params': criterion.to_pixels.parameters()})
-        if criterion.sim_loss is True:
-            optimizer.add_param_group({'params': criterion.self_sim_loss.parameters()}) 
         
         
     scaler = torch.cuda.amp.GradScaler() if args.amp else None
