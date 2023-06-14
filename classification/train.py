@@ -411,19 +411,25 @@ def main(args):
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
     criterion = initialise_model.get_criterion(args,dataset,model)
-
-    custom_keys_weight_decay = []
-    if args.bias_weight_decay is not None:
-        custom_keys_weight_decay.append(("bias", args.bias_weight_decay))
-    if args.transformer_embedding_decay is not None:
-        for key in ["cls_token", "pos_embedding", "relative_position_bias_table"]:
-            custom_keys_weight_decay.append((key, args.transformer_embedding_decay))
-    parameters = utils.set_weight_decay(
-        model,
-        args.weight_decay,
-        norm_weight_decay=args.norm_weight_decay,
-        custom_keys_weight_decay=custom_keys_weight_decay if len(custom_keys_weight_decay) > 0 else None,
-    )
+    
+    if args.layer_decay is not None:
+        parameters = utils.param_groups_lrd(model,
+                                            args.weight_decay,
+                                            ["cls_token", "pos_embedding"],
+                                           args.layer_decay)
+    else:    
+        custom_keys_weight_decay = []
+        if args.bias_weight_decay is not None:
+            custom_keys_weight_decay.append(("bias", args.bias_weight_decay))
+        if args.transformer_embedding_decay is not None:
+            for key in ["cls_token", "pos_embedding"]:
+                custom_keys_weight_decay.append((key, args.transformer_embedding_decay))
+        parameters = utils.set_weight_decay(
+            model,
+            args.weight_decay,
+            norm_weight_decay=args.norm_weight_decay,
+            custom_keys_weight_decay=custom_keys_weight_decay if len(custom_keys_weight_decay) > 0 else None,
+        )
     opt_name = args.opt.lower()
     if opt_name.startswith("sgd"):
         optimizer = torch.optim.SGD(
@@ -554,11 +560,12 @@ def main(args):
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema, scaler)
         lr_scheduler.step()
-        acc = evaluate(model, criterion, data_loader_test, device=device)
-        if acc>best_acc:
-            best_acc = acc
-        if model_ema:
-            evaluate(model_ema, criterion, data_loader_test, device=device, log_suffix="EMA")
+        if args.no_val is False:
+            acc = evaluate(model, criterion, data_loader_test, device=device)
+            if acc>best_acc:
+                best_acc = acc
+            if model_ema:
+                evaluate(model_ema, criterion, data_loader_test, device=device, log_suffix="EMA")
         if args.output_dir:
             checkpoint = {
                 "model": model_without_ddp.state_dict(),
@@ -603,6 +610,8 @@ def get_args_parser(add_help=True):
     parser.add_argument('--attn', default='softmax',type=str, help='softmax|gumbel')
     parser.add_argument('--classif_norm', default=None,type=str, help='Type of classifier Normalisation {None,norm,cosine')
     parser.add_argument('--criterion', default='ce',type=str, help='Criterion used for classifier {ce,bce,gce')
+    parser.add_argument('--ss_loss', default=False, help='Use Self-Similarity Loss in Simm',action='store_true')
+    
     
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
     parser.add_argument(
@@ -641,6 +650,13 @@ def get_args_parser(add_help=True):
         default=None,
         type=float,
         help="weight decay for embedding parameters for vision transformer models (default: None, same value as --wd)",
+    )
+    parser.add_argument(
+        "--layer-decay",
+        default=None,
+        type=float,
+        help="Apply layer-wise lr decay as in BEiT",
+        dest="layer_decay",
     )
     parser.add_argument(
         "--label-smoothing", default=0.0, type=float, help="label smoothing (default: 0.0)", dest="label_smoothing"
@@ -687,6 +703,13 @@ def get_args_parser(add_help=True):
         dest="test_only",
         help="Only test the model",
         action="store_true",
+    )
+    parser.add_argument(
+        "--no-val",
+        dest="no_val",
+        help="Don't run evaluation during training",
+        action="store_true",
+        default=False
     )
     parser.add_argument("--auto-augment", default=None, type=str, help="auto augment policy (default: None)")
     parser.add_argument("--ra-magnitude", default=9, type=int, help="magnitude of auto augment policy")

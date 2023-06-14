@@ -19,24 +19,17 @@ def posemb_sincos_2d(patches, temperature = 10000, dtype = torch.float32):
     pe = torch.cat((x.sin(), x.cos(), y.sin(), y.cos()), dim = 1)
     return pe.type(dtype)
 
-#     def bmc_loss(pred, target, temp=0.1,reduction='mean'):
-#         self_sim_matrix = torch.matmul(target,target.transpose(2,1))/torch.norm(target,dim=2,keepdim=True)**2
-#         dissimilar = torch.matmul(pred,target.transpose(2,1))/(torch.norm(target,dim=2,keepdim=True)*torch.norm(pred,dim=2,keepdim=True))
-
-#         logits = (dissimilar/temp)
-#         labels= (self_sim_matrix/temp).sigmoid()
-#         loss = F.binary_cross_entropy_with_logits(logits, labels)
-#         return loss
 
 class SelfSimilarityLoss(nn.Module):
-    def __init__(self):
+    def __init__(self,weight=10.0):
         super(SelfSimilarityLoss, self).__init__() 
         self.loss_fcn = nn.MSELoss()
+        self.weight=weight
        
     def forward(self, pred, target):
         self_sim_matrix = torch.matmul(target,target.transpose(2,1))/(torch.matmul(torch.norm(target,dim=2,keepdim=True),torch.norm(target,dim=2,keepdim=True).transpose(2,1)))
         dissimilar = torch.matmul(pred,target.transpose(2,1))/(torch.matmul(torch.norm(pred,dim=2,keepdim=True),torch.norm(target,dim=2,keepdim=True).transpose(2,1)))
-        loss = self.loss_fcn(dissimilar,self_sim_matrix)
+        loss = self.weight * self.loss_fcn(dissimilar,self_sim_matrix)
              
         return loss
 

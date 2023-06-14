@@ -194,7 +194,7 @@ def get_criterion(args,dataset,model=None):
         mim = SimMIM(
             encoder = model,
             masking_ratio = 0.5,  # they found 50% to yield the best results
-            sim_loss = True
+            sim_loss = args.ss_loss
         )
         return mim
         
