@@ -67,7 +67,7 @@ class Attention(nn.Module):
         elif self.attention =='softmax':
             attn = self.attend(dots)
         elif self.attention =='sigmoid':
-            gain = dots.sigmoid()
+            gain = torch.sigmoid(dots)
             attn = self.attend(dots)*gain
         attn = self.dropout(attn)
 
