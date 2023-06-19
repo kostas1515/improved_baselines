@@ -610,7 +610,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('--attn', default='softmax',type=str, help='softmax|gumbel')
     parser.add_argument('--classif_norm', default=None,type=str, help='Type of classifier Normalisation {None,norm,cosine')
     parser.add_argument('--criterion', default='ce',type=str, help='Criterion used for classifier {ce,bce,gce')
-    parser.add_argument('--ss_loss', default=False, help='Use Self-Similarity Loss in Simm',action='store_true')
+    parser.add_argument('--ss_loss', default=0.0, help='Use Self-Similarity Loss in Simm', type=float)
     
     
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")

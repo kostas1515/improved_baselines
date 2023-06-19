@@ -67,7 +67,7 @@ class SimMIM(nn.Module):
         *,
         encoder,
         masking_ratio = 0.5,
-        sim_loss=False
+        sim_loss=0.0
     ):
         super().__init__()
         assert masking_ratio > 0 and masking_ratio < 1, 'masking ratio must be kept between 0 and 1'
@@ -95,8 +95,8 @@ class SimMIM(nn.Module):
         self.mask_token = nn.Parameter(torch.randn(encoder_dim,requires_grad=True,device=device))
         self.to_pixels = nn.Linear(encoder_dim, pixel_values_per_patch,device=device)
         self.sim_loss = sim_loss
-        if self.sim_loss is True:
-            self.self_sim_loss = SelfSimilarityLoss2()
+        if self.sim_loss != 0.0:
+            self.self_sim_loss = SelfSimilarityLoss2(weight=self.sim_loss)
             
 
     def forward(self, img):
@@ -152,7 +152,7 @@ class SimMIM(nn.Module):
         # get the masked patches for the final reconstruction loss
         masked_patches = patches[batch_range, masked_indices]
         # calculate reconstruction loss
-        if self.sim_loss is True:
+        if self.sim_loss !=0.0:
             recon_loss = (self.self_sim_loss(pred_pixel_values, masked_patches) + F.l1_loss(pred_pixel_values, masked_patches))/ num_masked
         else:
             recon_loss = F.l1_loss(pred_pixel_values, masked_patches) / num_masked
