@@ -444,7 +444,7 @@ def main(args):
             parameters, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, eps=0.0316, alpha=0.9
         )
     elif opt_name == "adamw":
-        optimizer = torch.optim.AdamW(parameters, lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = torch.optim.AdamW(parameters, lr=args.lr, weight_decay=args.weight_decay,betas=(0.9,args.adamW2))
     elif opt_name == "lamb":
         optimizer = apex.optimizers.FusedLAMB(parameters, lr=args.lr, weight_decay=args.weight_decay)
     else:
@@ -453,6 +453,7 @@ def main(args):
     if args.criterion == 'simmim':
         optimizer.add_param_group({'params': criterion.mask_token})
         optimizer.add_param_group({'params': criterion.to_pixels.parameters()})
+        
         
         
     scaler = torch.cuda.amp.GradScaler() if args.amp else None
@@ -624,6 +625,7 @@ def get_args_parser(add_help=True):
     parser.add_argument("--opt", default="sgd", type=str, help="optimizer")
     parser.add_argument("--lr", default=0.1, type=float, help="initial learning rate")
     parser.add_argument("--momentum", default=0.9, type=float, metavar="M", help="momentum")
+    parser.add_argument('--adamW2', type=float, default=0.95)
     parser.add_argument(
         "--wd",
         "--weight-decay",
