@@ -80,23 +80,23 @@ class SimMIM(nn.Module):
         try:
             num_patches, encoder_dim = encoder.pos_embedding.shape[-2:]
         except AttributeError:
-            encoder_dim = encoder.to_patch_embedding[1].out_features
+            encoder_dim = encoder.to_patch_embedding[-1].out_features
 
         self.to_patch = encoder.to_patch_embedding[0]
+        
         self.patch_to_emb = nn.Sequential(*encoder.to_patch_embedding[1:])
 
-        try:
-            pixel_values_per_patch = encoder.to_patch_embedding[2].weight.shape[-1]
-        except IndexError:
-            pixel_values_per_patch = encoder.to_patch_embedding[-1].weight.shape[-1]
 
-        # simple linear head
+        pixel_values_per_patch = encoder.to_patch_embedding[-1].weight.shape[-1]
         
+        # simple linear head
         self.mask_token = nn.Parameter(torch.randn(encoder_dim,requires_grad=True,device=device))
         self.to_pixels = nn.Linear(encoder_dim, pixel_values_per_patch,device=device)
+        
+        # simple selfsimilarity_loss
         self.sim_loss = sim_loss
         if self.sim_loss != 0.0:
-            self.self_sim_loss = SelfSimilarityLoss2(weight=self.sim_loss)
+            self.self_sim_loss = SelfSimilarityLoss(weight=self.sim_loss)
             
 
     def forward(self, img):

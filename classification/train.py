@@ -8,6 +8,7 @@ import torch
 import torch.utils.data
 import torchvision
 import torchvision.models as models
+import torch.distributed as dist
 
 try:
     import presets
@@ -444,9 +445,10 @@ def main(args):
             parameters, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, eps=0.0316, alpha=0.9
         )
     elif opt_name == "adamw":
-        optimizer = torch.optim.AdamW(parameters, lr=args.lr, weight_decay=args.weight_decay,betas=(0.9,args.adamW2))
+        adam_eps = 1e-5 if args.apex else 1e-8
+        optimizer = torch.optim.AdamW(parameters, lr=args.lr, weight_decay=args.weight_decay,betas=(0.9,args.adamW2),eps=adam_eps)
     elif opt_name == "lamb":
-        optimizer = apex.optimizers.FusedLAMB(parameters, lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = apex.optimizers.FusedLAMB(parameters, lr=args.lr, weight_decay=args.weight_decay,betas=(0.9,args.adamW2))
     else:
         raise RuntimeError(f"Invalid optimizer {args.opt}. Only SGD, RMSprop and AdamW are supported.")
         
@@ -458,9 +460,15 @@ def main(args):
         
     scaler = torch.cuda.amp.GradScaler() if args.amp else None
     if args.apex:
-        model, optimizer = amp.initialize(model, optimizer,
+        if args.criterion == 'simmim':
+            [model,criterion], optimizer = amp.initialize([model,criterion], optimizer,
                                           opt_level=args.apex_opt_level
                                           )
+        else:
+            model, optimizer = amp.initialize(model, optimizer,
+                                          opt_level=args.apex_opt_level
+                                          )
+        
     if args.decoup:
         model = select_training_param(model)
 
@@ -557,6 +565,15 @@ def main(args):
     start_time = time.time()
     best_acc = 0
     for epoch in range(args.start_epoch, args.epochs):
+        if args.ms_train is True:
+            temp_train_crop=torch.randint(8, 20, (1,)).cuda()
+            if args.distributed:
+                batch_w=[torch.zeros_like(temp_train_crop) for _ in range(dist.get_world_size())]
+                dist.all_gather(batch_w,temp_train_crop)
+                temp_train_crop=torch.cat(batch_w,axis=0)[0]
+                print(temp_train_crop)
+                setattr(data_loader.dataset.transform.transforms.transforms[0],'size',(temp_train_crop.item()*16, temp_train_crop.item()*16))
+                
         if args.distributed:
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema, scaler)
@@ -612,7 +629,8 @@ def get_args_parser(add_help=True):
     parser.add_argument('--classif_norm', default=None,type=str, help='Type of classifier Normalisation {None,norm,cosine')
     parser.add_argument('--criterion', default='ce',type=str, help='Criterion used for classifier {ce,bce,gce')
     parser.add_argument('--ss_loss', default=0.0, help='Use Self-Similarity Loss in Simm', type=float)
-    
+    parser.add_argument('--ms_train',default=False, action='store_true',
+                        help='Use Multi-scale training')
     
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
     parser.add_argument(

@@ -89,7 +89,7 @@ class Transformer(nn.Module):
         return x
 
 class SimpleViT(nn.Module):
-    def __init__(self, *, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, channels = 3, dim_head = 64,attention='softmax',use_norm=None):
+    def __init__(self, *, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, channels = 3, dim_head = 64,attention='softmax',use_norm=None,multi_scale=False):
         super().__init__()
         image_height, image_width = pair(image_size)
         patch_height, patch_width = pair(patch_size)
@@ -98,11 +98,21 @@ class SimpleViT(nn.Module):
 
         num_patches = (image_height // patch_height) * (image_width // patch_width)
         patch_dim = channels * patch_height * patch_width
-
-        self.to_patch_embedding = nn.Sequential(
-            Rearrange('b c (h p1) (w p2) -> b h w (p1 p2 c)', p1 = patch_height, p2 = patch_width),
-            nn.Linear(patch_dim, dim),
-        )
+        self.multi_scale = multi_scale
+        
+        if self.multi_scale is True:
+            self.to_patch_embedding = nn.Sequential(
+                Rearrange('b c (h p1) (w p2) -> b h w (p1 p2 c)', p1 = patch_height, p2 = patch_width),
+                Rearrange('b h w c -> b c h w'),
+                nn.Conv2d(patch_dim,patch_dim,3,padding=1),
+                Rearrange('b c h w -> b h w c'),
+                nn.Linear(patch_dim, dim),
+            )
+        else:
+            self.to_patch_embedding = nn.Sequential(
+                Rearrange('b c (h p1) (w p2) -> b h w (p1 p2 c)', p1 = patch_height, p2 = patch_width),
+                nn.Linear(patch_dim, dim),
+            )
 
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim,attention=attention)
 

@@ -53,7 +53,8 @@ def get_model(args,num_classes):
                     heads = 6,
                     mlp_dim = 1536,
                     attention=attention,
-                    use_norm=args.classif_norm)
+                    use_norm=args.classif_norm,
+                    multi_scale=args.ms_train)
         elif args.model == 'b_simple_vit':
             model = SimpleViT(
                     image_size = args.train_crop_size,
