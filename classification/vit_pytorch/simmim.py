@@ -36,30 +36,17 @@ class SelfSimilarityLoss(nn.Module):
     
     
 class SelfSimilarityLoss2(nn.Module):
-    def __init__(self,weight=0.5,patch_size=16,p_norm=2):
+    def __init__(self,weight=0.05,p_norm=2):
         super(SelfSimilarityLoss2, self).__init__() 
-        self.loss_fcn = nn.MSELoss(reduction='sum')
         self.weight=weight
-        self.rotate_patch = Rearrange('b a (p1 p2 c) -> b a (p2 p1 c)', p1 = patch_size, p2 = patch_size)
         self.p_norm=p_norm
        
     def forward(self, pred, target):
         self_sim_matrix = torch.cdist(target,target,p=self.p_norm)
-        corr1 = torch.exp(-1*(self_sim_matrix-self_sim_matrix.mean())/self_sim_matrix.std())
-        self_sim_matrix = torch.cdist(target,self.rotate_patch(target),p=self.p_norm)
-        corr2 = torch.exp(-1*(self_sim_matrix-self_sim_matrix.mean())/self_sim_matrix.std())
-        avg_corr = torch.tril((corr1 +corr2)/2,diagonal=-1)
-        
         dissimilar = torch.cdist(pred,target,p=self.p_norm)
-        diss1 = torch.exp(-1*(dissimilar-dissimilar.mean())/dissimilar.std())
-        dissimilar = torch.cdist(pred,self.rotate_patch(target),p=self.p_norm)
-        diss2 = torch.exp(-1*(dissimilar-dissimilar.mean())/dissimilar.std())
-        avg_diss = torch.tril((diss1 +diss2)/2,diagonal=-1)
-        elements = (avg_diss!=0.0).sum()
+        loss =  F.l1_loss(self_sim_matrix,dissimilar) / self_sim_matrix.shape[1]
         
-        loss = self.weight * self.loss_fcn(avg_diss,avg_corr)/elements
-        
-        return loss
+        return self.weight * loss
 
 class SimMIM(nn.Module):
     def __init__(
@@ -96,7 +83,7 @@ class SimMIM(nn.Module):
         # simple selfsimilarity_loss
         self.sim_loss = sim_loss
         if self.sim_loss != 0.0:
-            self.self_sim_loss = SelfSimilarityLoss(weight=self.sim_loss)
+            self.self_sim_loss = SelfSimilarityLoss2(weight=self.sim_loss)
             
 
     def forward(self, img):
@@ -155,9 +142,7 @@ class SimMIM(nn.Module):
         if self.sim_loss !=0.0:
             recon_loss = (self.self_sim_loss(pred_pixel_values, masked_patches) + F.l1_loss(pred_pixel_values, masked_patches))/ num_masked
         else:
-            recon_loss = F.l1_loss(pred_pixel_values, masked_patches) / num_masked
-
-        
+            recon_loss = F.l1_loss(pred_pixel_values, masked_patches) / num_masked     
 #         
         return recon_loss
     
