@@ -7,9 +7,9 @@ from classification.resnet_pytorch import SE_Block
 from classification.cbam import SpatialGate
 
 class ResNetCam(nn.Module):
-    def __init__(self,model,synset_loc='../../../datasets/ILSVRC/LOC_synset_mapping.txt',dataset='ImageNet-LT'):
+    def __init__(self,model,synset_loc='../../../datasets/ILSVRC/LOC_synset_mapping.txt',dataset='ImageNet-LT',transformed=True):
         super(ResNetCam, self).__init__()
-        
+        self.transformed = transformed
         # get the model
         self.backbone = nn.Sequential(*list(model.children())[:-2])
         
@@ -21,30 +21,37 @@ class ResNetCam(nn.Module):
         
         # placeholder for the gradients
         self.gradients = None
-        
+        self.dataset = dataset
         self.transforms = transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
         
-        with open(synset_loc,'r') as file:
-            names= file.readlines()
-            self.names = [' '.join(n.split(' ')[1:]).rstrip() for n in names]
-        if dataset =='ImageNet-LT':
+        
+        if self.dataset =='ImageNet-LT':
+            num_classes=1000
+            with open(synset_loc,'r') as file:
+                names= file.readlines()
+                self.names = [' '.join(n.split(' ')[1:]).rstrip() for n in names]
             with open('../../../datasets/ImageNet-LT/ImageNet_LT_train.txt') as f:
                 targets = [int(line.split()[1]) for line in f]
+        elif self.dataset =='inat18':
+            num_classes=8142
+            with open(synset_loc,'r') as file:
+                names= file.readlines()
+                self.names = [n.rstrip() for n in names]
+            with open('../../../datasets/train_val2018/iNaturalist18_train.txt') as f:
+                targets = [int(line.split()[1]) for line in f]
 
-            cls_num_list_old = [np.sum(np.array(targets) == i) for i in range(1000)]
+        cls_num_list_old = [np.sum(np.array(targets) == i) for i in range(num_classes)]
 
-            # generate class_map: class index sort by num (descending)
-            sorted_classes = np.argsort(-np.array(cls_num_list_old))
-            class_map = [0 for i in range(1000)]
-            for i in range(1000):
-                class_map[sorted_classes[i]] = i
-            self.class_map = class_map
-        else:
-            self.class_map = None
+        # generate class_map: class index sort by num (descending)
+        sorted_classes = np.argsort(-np.array(cls_num_list_old))
+        class_map = [0 for i in range(num_classes)]
+        for i in range(num_classes):
+            class_map[sorted_classes[i]] = i
+        self.class_map = class_map
         
     
     # hook for the gradients of the activations
@@ -71,25 +78,36 @@ class ResNetCam(nn.Module):
     def get_activations(self, x):
         return self.backbone(x)
     
-    def show_cat(self,image):
-        img = self.transforms(image).unsqueeze(0).cuda()
+    def show_cat(self,img,index):
+        if self.transformed is False:
+            img = self.transforms(img).cuda()
         pred = self.forward(img)
-        category =  pred.argmax().item()
+        category =  pred.argmax(axis=1)[index].item()
         if self.class_map is not None:
-            if category >= 864:
-                indicator ='R'
-            elif (category >= 385) & (category < 864):
-                indicator ='C'
-            else:
-                indicator = 'F'
+            if self.dataset =='ImageNet-LT':
+                if category >= 864:
+                    indicator ='R'
+                elif (category >= 385) & (category < 864):
+                    indicator ='C'
+                else:
+                    indicator = 'F'
+            elif self.dataset =='inat18':
+                if category >= 864:
+                    indicator ='R'
+                elif (category >= 385) & (category < 864):
+                    indicator ='C'
+                else:
+                    indicator = 'F'
             return indicator+': '+ self.names[self.class_map.index(category)]
         else:
             return self.names[category]
         
            
     def show_activation(self,image):
-        
-        img = self.transforms(image).unsqueeze(0).cuda()
+        if self.transformed is False:
+            img = self.transforms(image).unsqueeze(0).cuda()
+        else:
+            img=image.unsqueeze(0)
         pred = self.forward(img)
         
         max_pred = pred.argmax().item()
@@ -113,10 +131,19 @@ class ResNetCam(nn.Module):
         # normalize the heatmap
         heatmap = heatmap.float()
         heatmap /= torch.max(heatmap)
-        
-        numpy_image = np.asarray(image)
-        
+        try:
+            numpy_image = np.asarray(image)
+        except TypeError:
+            numpy_image = np.asarray(image.cpu())
+
+            numpy_image=numpy_image.transpose(1, 2, 0)
+            numpy_image *= np.array(self.transforms.transforms[-1].std)
+            numpy_image += np.array(self.transforms.transforms[-1].mean)
+            numpy_image = numpy_image*255
+
         heatmap = cv2.resize(heatmap.numpy(), (numpy_image.shape[1], numpy_image.shape[0]))
+        
+
         heatmap = np.uint8(255 * heatmap)
         heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
         superimposed_img = heatmap * 0.4 + numpy_image
@@ -154,6 +181,8 @@ class SERecorder(nn.Module):
                 handle = module.excitation.register_forward_hook(self._hook)
             elif self.part =='gap':
                 handle = module.squeeze.register_forward_hook(self._hook)
+            elif self.part =='uniact':
+                handle = module.uniact.register_forward_hook(self._hook)
             self.hooks.append(handle)
         self.hook_registered = True
 

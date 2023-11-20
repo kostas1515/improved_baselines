@@ -5,6 +5,7 @@ try:
     from vit_pytorch import ViT
     from vit_pytorch.simmim import SimMIM
     from vit_pytorch.cait import CaiT
+    from vit_pytorch.selfsimiliarity import SelfSimilarity
     import resnet_pytorch
     import resnet_cifar
     import custom
@@ -150,10 +151,8 @@ def get_model(args,num_classes):
         try:
             # model = torchvision.models.__dict__[args.model](pretrained=args.pretrained,num_classes=num_classes)
             print(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se},use_gumbel_cb={args.use_gumbel_cb},pretrained="{args.pretrained}")')
-            try:
-                model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se},use_gumbel_cb={args.use_gumbel_cb},pretrained="{args.pretrained}")')
-            except TypeError:
-                model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",pretrained="{args.pretrained}")')
+            model = eval(f'resnet_pytorch.{args.model}(num_classes={num_classes},use_norm="{args.classif_norm}",use_gumbel={args.use_gumbel_se},use_gumbel_cb={args.use_gumbel_cb},pretrained="{args.pretrained}")')
+            
 
         except AttributeError:
             #model does not exist in pytorch load it from resnet_cifar
@@ -194,9 +193,10 @@ def get_criterion(args,dataset,model=None):
     elif args.criterion == 'simmim':
         mim = SimMIM(
             encoder = model,
-            masking_ratio = 0.6,  # they found 50% to yield the best results
+            masking_ratio = 0.5,  # they found 50% to yield the best results
             sim_loss = args.ss_loss
         )
+
         return mim
         
 

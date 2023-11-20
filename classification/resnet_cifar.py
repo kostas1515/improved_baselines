@@ -34,6 +34,31 @@ except ImportError:
 
 __all__ = ['ResNet_s', 'resnet20', 'resnet32', 'resnet44', 'resnet56', 'resnet110', 'resnet1202']
 
+class Unified(nn.Module):
+    __constants__ = ['num_parameters']
+    num_parameters: int
+
+    def __init__(self, num_parameters: int = 1,device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        self.num_parameters = num_parameters
+        super().__init__()
+        
+        init1=torch.rand(1).item()
+        self.lambda_param = nn.Parameter(torch.empty(num_parameters, **factory_kwargs).fill_(init1))
+        init2=-torch.rand(1).item()
+        self.kappa_param = nn.Parameter(torch.empty(num_parameters, **factory_kwargs).fill_(init2))
+
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        lambda_param = torch.clamp(self.lambda_param,min=0.0001,max=10)
+        kappa_param = torch.clamp(self.kappa_param,min=-3.5,max=3.5)
+        out= (lambda_param*torch.exp(-input*kappa_param)+1)**(-1/lambda_param)
+        return out
+
+    def extra_repr(self) -> str:
+        return 'num_parameters={}'.format(self.num_parameters)
+
+    
 def _weights_init(m):
     classname = m.__class__.__name__
     if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
@@ -129,20 +154,31 @@ class SE_Block(nn.Module):
     def __init__(self, c, r=4,use_gumbel=False):
         super().__init__()
         self.squeeze = nn.AdaptiveAvgPool2d(1)
-        self.excitation = nn.Sequential(
-            nn.Linear(c, c // r, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(c // r, c, bias=False)
-        )
         self.use_gumbel = use_gumbel
+        if self.use_gumbel is True:
+            self.unact = Unified()
+            self.norm = nn.LayerNorm(c)
+            self.excitation = nn.Sequential(
+                nn.Linear(c, c // r, bias=False),
+                nn.ReLU(inplace=True),
+                nn.Linear(c // r, c, bias=False),
+                nn.Dropout(p=0.1))
+        else:
+            self.excitation = nn.Sequential(
+                nn.Linear(c, c // r, bias=False),
+                nn.ReLU(inplace=True),
+                nn.Linear(c // r, c, bias=False))
+            
         
 
     def forward(self, x):
         bs, c, _, _ = x.shape
         y = self.squeeze(x).view(bs, c)
+        if self.use_gumbel is True:
+            y= self.norm(y)
         y = self.excitation(y).view(bs, c, 1, 1)
         if self.use_gumbel is True:
-            y=torch.exp(-torch.exp(-torch.clamp(y,min=-4.0,max=10.0)))
+            y=self.unact(y)
         else:
             y=y.sigmoid()
         return x * y.expand_as(x)
@@ -363,6 +399,8 @@ class ResNet_s(nn.Module):
             self.linear = NormedLinear(64, num_classes)
         elif use_norm=='cosine':
             self.linear = CosNorm_Classifier(64, num_classes)
+        elif use_norm=='lr_cosine':
+            self.linear = CosNorm_Classifier(64, num_classes,learnable=True)
         elif use_norm=='dual_head':
             self.linear = nn.Linear(64, num_classes)
             self.linear2 = nn.Linear(64, num_classes)

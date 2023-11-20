@@ -227,6 +227,12 @@ def finetune_places(model):
     
     for v in model.layer4.parameters():
         v.requires_grad = True
+    for name,param in model.layer4.named_parameters():
+        if name.endswith('param'):
+            init = torch.rand(1).item()
+            param.data.fill_(init)
+    
+    
         
 
     return model
@@ -421,7 +427,11 @@ def main(args):
     else:    
         custom_keys_weight_decay = []
         if args.bias_weight_decay is not None:
-            custom_keys_weight_decay.append(("bias", args.bias_weight_decay))
+#             custom_keys_weight_decay.append(("bias", args.bias_weight_decay))
+            custom_keys_weight_decay.append(("lambda_param", args.bias_weight_decay))
+            custom_keys_weight_decay.append(("kappa_param", args.bias_weight_decay))
+            
+            
         if args.transformer_embedding_decay is not None:
             for key in ["cls_token", "pos_embedding"]:
                 custom_keys_weight_decay.append((key, args.transformer_embedding_decay))
@@ -689,7 +699,7 @@ def get_args_parser(add_help=True):
                         help='decrease lr every step-size epochs')
     parser.add_argument("--lr-warmup-epochs", default=0, type=int, help="the number of epochs to warmup (default: 0)")
     parser.add_argument(
-        "--lr-warmup-method", default="constant", type=str, help="the warmup method (default: constant)"
+        "--lr-warmup-method", default="linear", type=str, help="the warmup method (default: constant)"
     )
     parser.add_argument("--lr-warmup-decay", default=0.01, type=float, help="the decay for lr")
     parser.add_argument("--lr-step-size", default=30, type=int, help="decrease lr every step-size epochs")
